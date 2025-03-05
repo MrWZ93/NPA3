@@ -30,6 +30,7 @@ from gui.components.psd_analyzer import PSDAnalyzerDialog
 from utils.config_manager import ConfigManager  # 添加ConfigManager导入
 
 from gui.components.fitter_dialog import SimpleFitterDialog
+from gui.components.histogram import HistogramDialog
 
 import logging
 
@@ -442,6 +443,12 @@ class FileExplorerApp(QMainWindow):
         spikes_detector_btn.setIcon(QIcon.fromTheme("utilities-system-monitor", QIcon.fromTheme("applications-utilities")))
         spikes_detector_btn.clicked.connect(self.open_spikes_detector)
         toolbar_layout.addWidget(spikes_detector_btn)
+        
+        # 添加Histogram按钮
+        histogram_btn = QPushButton("Histogram")
+        histogram_btn.setIcon(QIcon.fromTheme("view-statistics", QIcon.fromTheme("office-chart-bar")))
+        histogram_btn.clicked.connect(self.open_histogram)
+        toolbar_layout.addWidget(histogram_btn)
         
         # 添加弹簧使帮助按钮靠右
         toolbar_layout.addStretch(1)
@@ -941,6 +948,22 @@ class FileExplorerApp(QMainWindow):
         
         # 创建峰值检测器对话框
         dialog = SpikesDetectorDialog(self)
+        
+        # 设置数据和采样率
+        dialog.set_data(self.visualizer.data, self.visualizer.sampling_rate)
+        
+        # 显示对话框
+        dialog.exec()
+    
+    def open_histogram(self):
+        """打开直方图分析工具"""
+        # 检查是否有加载的数据
+        if not hasattr(self.visualizer, 'data') or self.visualizer.data is None:
+            QMessageBox.warning(self, "Error", "Please load data first")
+            return
+            
+        # 创建直方图对话框
+        dialog = HistogramDialog(self)
         
         # 设置数据和采样率
         dialog.set_data(self.visualizer.data, self.visualizer.sampling_rate)

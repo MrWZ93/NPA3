@@ -6,5 +6,8 @@ Histogram Package - 直方图分析组件
 """
 
 from .histogram_dialog import HistogramDialog
+from .histogram_plot import HistogramPlot
+from .controls import HistogramControlPanel, FileChannelControl
+from .data_manager import HistogramDataManager
 
-__all__ = ['HistogramDialog']
+__all__ = ['HistogramDialog', 'HistogramPlot', 'HistogramControlPanel', 'FileChannelControl', 'HistogramDataManager']

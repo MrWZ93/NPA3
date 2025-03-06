@@ -503,6 +503,43 @@ class PSDAnalyzerDialog(QDialog):
         tools_layout.addWidget(self.show_legend_check)
         tools_layout.addStretch(1)
         
+        # 添加频率控制选项
+        self.cutoff_widget = QWidget()
+        cutoff_layout = QHBoxLayout(self.cutoff_widget)
+        cutoff_layout.setContentsMargins(0, 0, 0, 0)
+        cutoff_layout.setSpacing(5)
+        
+        self.compare_cutoff_low_label = QLabel("Low Cutoff (Hz):")
+        self.compare_cutoff_low = QDoubleSpinBox()
+        self.compare_cutoff_low.setRange(0, 100000)
+        self.compare_cutoff_low.setValue(0)
+        self.compare_cutoff_low.setSingleStep(10)
+        self.compare_cutoff_low.setToolTip("Apply low frequency cutoff to all curves")
+        
+        self.compare_cutoff_high_label = QLabel("High Cutoff (Hz):")
+        self.compare_cutoff_high = QDoubleSpinBox()
+        self.compare_cutoff_high.setRange(0, 100000)
+        self.compare_cutoff_high.setValue(0)
+        self.compare_cutoff_high.setSingleStep(100)
+        self.compare_cutoff_high.setToolTip("Apply high frequency cutoff to all curves")
+        
+        self.apply_cutoff_button = QPushButton("Apply Cutoffs")
+        self.apply_cutoff_button.setToolTip("Apply frequency cutoffs to selected curves")
+        self.apply_cutoff_button.clicked.connect(self.apply_compare_cutoffs)
+        
+        cutoff_layout.addWidget(self.compare_cutoff_low_label)
+        cutoff_layout.addWidget(self.compare_cutoff_low)
+        cutoff_layout.addWidget(self.compare_cutoff_high_label)
+        cutoff_layout.addWidget(self.compare_cutoff_high)
+        cutoff_layout.addWidget(self.apply_cutoff_button)
+        cutoff_layout.addStretch(1)
+        
+        # 在工具栏下面添加截止频率控制面板
+        tools_widget2 = QWidget()
+        tools_layout2 = QHBoxLayout(tools_widget2)
+        tools_layout2.setContentsMargins(0, 0, 0, 0)
+        tools_layout2.addWidget(self.cutoff_widget)
+        
         # 创建列表显示已添加的PSD
         list_group = QGroupBox("Added PSD Curves")
         list_layout = QVBoxLayout(list_group)
@@ -525,6 +562,7 @@ class PSDAnalyzerDialog(QDialog):
         
         # 将所有组件添加到比较页面布局
         self.compare_layout.addWidget(tools_widget)
+        self.compare_layout.addWidget(tools_widget2)
         
         # 创建一个分割器，左边是列表，右边是图表
         compare_splitter = QSplitter(Qt.Orientation.Horizontal)
@@ -1068,68 +1106,65 @@ class PSDAnalyzerDialog(QDialog):
         if high_cutoff > 0:
             cutoff_text += f"_high{int(high_cutoff)}"
         
-        # 获取保存格式选择
-        formats = ["CSV (*.csv)", "JSON (*.json)", "NPY Binary (*.npy)"]
-        format_buttons = QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No | QMessageBox.StandardButton.Discard | QMessageBox.StandardButton.Cancel
-        msg_box = QMessageBox(QMessageBox.Icon.Question, "Export Format", "Select export format:", format_buttons, self)
-        
-        # 设置按钮文本
-        msg_box.button(QMessageBox.StandardButton.Yes).setText(formats[0])
-        msg_box.button(QMessageBox.StandardButton.No).setText(formats[1])
-        msg_box.button(QMessageBox.StandardButton.Discard).setText(formats[2])
-        
-        # 显示对话框
-        selected_format = msg_box.exec()
-        
-        # 检查结果
-        ok = selected_format != QMessageBox.StandardButton.Cancel
-        
-        if not ok:
-            return
-        
-        # 确定选择的格式索引
-        if selected_format == QMessageBox.StandardButton.Yes:
-            format_idx = 0  # CSV
-        elif selected_format == QMessageBox.StandardButton.No:
-            format_idx = 1  # JSON
-        elif selected_format == QMessageBox.StandardButton.Discard:
-            format_idx = 2  # NPY
-        else:
-            return  # 其他情况，如关闭对话框
-        
-        # 获取保存路径
+        # 准备默认文件名
         default_name = f"psd_data{cutoff_text}"
         if self.file_loader.file_path:
             base_name = os.path.splitext(os.path.basename(self.file_loader.file_path))[0]
             default_name = f"{base_name}_{channel_name}_psd{cutoff_text}"
         
+        # 创建文件过滤器字符串
+        file_filter = "CSV Files (*.csv);;JSON Files (*.json);;NPY Binary Files (*.npy);;All Files (*)"
+        
+        # 直接显示保存文件对话框，让用户选择文件类型和保存路径
+        file_path, selected_filter = QFileDialog.getSaveFileName(
+            self, "Export PSD Data", default_name, file_filter
+        )
+        
+        if not file_path:
+            return
+        
+        # 确定用户选择的格式
+        if selected_filter == "CSV Files (*.csv)":
+            format_idx = 0  # CSV
+            # 确保文件扩展名是.csv
+            if not file_path.lower().endswith('.csv'):
+                file_path += '.csv'
+        elif selected_filter == "JSON Files (*.json)":
+            format_idx = 1  # JSON
+            # 确保文件扩展名是.json
+            if not file_path.lower().endswith('.json'):
+                file_path += '.json'
+        elif selected_filter == "NPY Binary Files (*.npy)":
+            format_idx = 2  # NPY
+            # 确保文件扩展名是.npy
+            if not file_path.lower().endswith('.npy'):
+                file_path += '.npy'
+        else:
+            # 通过文件扩展名判断格式
+            if file_path.lower().endswith('.csv'):
+                format_idx = 0  # CSV
+            elif file_path.lower().endswith('.json'):
+                format_idx = 1  # JSON
+            elif file_path.lower().endswith('.npy'):
+                format_idx = 2  # NPY
+            else:
+                # 默认为CSV
+                format_idx = 0
+                file_path += '.csv'
+        
+        # 根据选择的格式导出数据
         if format_idx == 0:  # CSV
-            default_name += ".csv"
-            file_path, _ = QFileDialog.getSaveFileName(
-                self, "Export PSD Data", default_name, "CSV Files (*.csv)"
-            )
-            if not file_path:
-                return
             export_psd_to_csv(file_path, frequencies, psd, is_db_scale, normalized, plot_params, self)
+            self.status_label.setText(f"PSD data exported to CSV: {file_path}")
         
         elif format_idx == 1:  # JSON
-            default_name += ".json"
-            file_path, _ = QFileDialog.getSaveFileName(
-                self, "Export PSD Data", default_name, "JSON Files (*.json)"
-            )
-            if not file_path:
-                return
             peak_indices = self.psd_visualizer.current_peak_indices
             export_psd_to_json(file_path, frequencies, psd, is_db_scale, normalized, plot_params, peak_indices, self)
+            self.status_label.setText(f"PSD data exported to JSON: {file_path}")
         
         elif format_idx == 2:  # NPY
-            default_name += ".npy"
-            file_path, _ = QFileDialog.getSaveFileName(
-                self, "Export PSD Data", default_name, "NPY Files (*.npy)"
-            )
-            if not file_path:
-                return
             export_psd_to_npy(file_path, frequencies, psd, plot_params, self)
+            self.status_label.setText(f"PSD data exported to NPY: {file_path}")
     
     def save_preset(self):
         """保存PSD参数预设"""
@@ -1294,6 +1329,24 @@ class PSDAnalyzerDialog(QDialog):
     # -------------------- 比较功能相关方法 --------------------
     def add_to_compare(self):
         """将当前PSD添加到比较选项卡"""
+        # 获取当前的采样率和处理设置
+        sampling_rate = self.file_loader.sampling_rate
+        is_db_scale = self.psd_display_combo.currentText() == "dB Scale"
+        normalize = self.psd_normalize_check.isChecked()
+        log_x = self.psd_log_x_check.isChecked()
+        log_y = self.psd_log_y_check.isChecked()
+        exclude_dc = self.psd_exclude_dc_check.isChecked()
+        low_cutoff = self.cutoff_freq_low.value()
+        high_cutoff = self.cutoff_freq_high.value()
+        
+        # 获取当前的窗口类型和其他PSD计算参数
+        window_type = self.psd_window_combo.currentText()
+        nfft_text = self.psd_nfft_combo.currentText()
+        nperseg_text = self.psd_nperseg_combo.currentText()
+        noverlap_text = self.psd_noverlap_combo.currentText()
+        detrend = self.psd_detrend_combo.currentText()
+        scaling = self.psd_scaling_combo.currentText()
+        
         # 获取当前PSD数据
         frequencies, psd, normalized, plot_params = self.psd_visualizer.get_current_data()
         if frequencies is None or psd is None:
@@ -1303,22 +1356,61 @@ class PSDAnalyzerDialog(QDialog):
         # 获取当前选择的通道
         channel_name = self.channel_combo.currentText()
         
+        # 获取原始数据
+        channel_data = self.file_loader.get_channel_data(channel_name, use_original=True)
+        if channel_data is None:
+            QMessageBox.warning(self, "Error", f"Cannot get data for channel: {channel_name}")
+            return
+        
+        # 创建一个完整的参数字典，包含前端处理和计算参数
+        psd_params = {
+            # 计算参数
+            "window_type": window_type,
+            "nfft": nfft_text,
+            "nperseg": nperseg_text,
+            "noverlap": noverlap_text,
+            "detrend": detrend,
+            "scaling": scaling,
+            "sampling_rate": sampling_rate,
+            
+            # 前端显示参数
+            "is_db_scale": is_db_scale,
+            "normalize": normalize,
+            "log_x": log_x,
+            "log_y": log_y,
+            "exclude_dc": exclude_dc,
+            "low_cutoff": low_cutoff,
+            "high_cutoff": high_cutoff
+        }
+        
         # 获取当前文件路径或名称
         if self.file_loader.file_path:
             file_name = os.path.basename(self.file_loader.file_path)
         else:
             file_name = "Current Data"
         
-        # 创建PSD项目的标识信息
+        # 创建PSD项目的标识信息，包含原始数据和参数
         psd_info = {
             "file": file_name,
             "channel": channel_name,
             "nfft": plot_params.get('nfft', "Unknown"),
             "window": plot_params.get('window_type', "Unknown"),
-            "sampling_rate": self.file_loader.sampling_rate,
+            "sampling_rate": sampling_rate,
+            
+            # 是否显示该曲线
+            "visible": True,
+            
+            # 原始频率和PSD数据
+            "original_frequencies": frequencies,
+            "original_psd": psd,
+            
+            # 当前显示的处理后数据
             "frequencies": frequencies,
             "psd": psd,
-            "normalized_psd": psd / np.max(psd) if np.max(psd) > 0 else psd  # 预计算归一化值
+            "normalized_psd": psd / np.max(psd) if np.max(psd) > 0 else psd,  # 预计算归一化值
+            
+            # 完整的参数字典
+            "params": psd_params
         }
         
         # 生成唯一ID和显示名称
@@ -1445,20 +1537,18 @@ class PSDAnalyzerDialog(QDialog):
         
         # 先绘制未选中的曲线（低层）
         for psd_id, data in unselected_data:
-            frequencies = data["frequencies"]
-            
             # 选择要绘制的PSD数据
             if normalize:
-                psd = data["normalized_psd"]
+                psd_to_plot = data["normalized_psd"]
             else:
-                psd = data["psd"]
+                psd_to_plot = data["psd"]
             
             # 如果有选中项，未选中的降低不透明度
             alpha = 0.4 if selected_ids else 1.0
             
             # 绘制曲线
             self.compare_axes.plot(
-                frequencies, psd,
+                data["frequencies"], psd_to_plot,
                 color=data["color"],
                 linewidth=1.0,
                 alpha=alpha,
@@ -1467,17 +1557,15 @@ class PSDAnalyzerDialog(QDialog):
         
         # 然后绘制选中的曲线（高层）
         for psd_id, data in selected_data:
-            frequencies = data["frequencies"]
-            
             # 选择要绘制的PSD数据
             if normalize:
-                psd = data["normalized_psd"]
+                psd_to_plot = data["normalized_psd"]
             else:
-                psd = data["psd"]
+                psd_to_plot = data["psd"]
             
             # 绘制选中的曲线，加粗且完全不透明
             self.compare_axes.plot(
-                frequencies, psd,
+                data["frequencies"], psd_to_plot,
                 color=data["color"],
                 linewidth=2.5,  # 更粗的线条
                 alpha=1.0,      # 完全不透明
@@ -1517,6 +1605,63 @@ class PSDAnalyzerDialog(QDialog):
         
         # 重绘图表
         self.compare_canvas.draw()
+
+    def apply_compare_cutoffs(self):
+        """应用频率截止设置到选中的曲线"""
+        # 获取选中的项目
+        selected_items = self.psd_list_widget.selectedItems()
+        if not selected_items:
+            # 如果没有选中项目，应用于所有曲线
+            QMessageBox.information(self, "Info", "No curves selected. Cutoffs will be applied to all curves.")
+            selected_ids = [str(i+1) for i in range(len(self.compare_data))]
+        else:
+            # 获取选中项目的ID
+            selected_ids = [item.data(Qt.ItemDataRole.UserRole) for item in selected_items]
+        
+        # 获取截止频率设置
+        low_cutoff = self.compare_cutoff_low.value()
+        high_cutoff = self.compare_cutoff_high.value()
+        
+        # 更新所选中的PSD数据
+        has_updates = False
+        for i, data in enumerate(self.compare_data):
+            psd_id = str(i + 1)  # 构造ID
+            
+            if psd_id in selected_ids:
+                has_updates = True
+                # 更新参数
+                data["params"]["low_cutoff"] = low_cutoff
+                data["params"]["high_cutoff"] = high_cutoff
+                
+                # 重新处理频率数据
+                frequencies = data["original_frequencies"]
+                psd = data["original_psd"]
+                
+                # 应用频率截止
+                mask = np.ones_like(frequencies, dtype=bool)
+                if low_cutoff > 0:
+                    mask &= (frequencies >= low_cutoff)
+                if high_cutoff > 0:
+                    mask &= (frequencies <= high_cutoff)
+                
+                # 仅当有截止时才应用过滤
+                if not np.all(mask):
+                    data["frequencies"] = frequencies[mask]
+                    data["psd"] = psd[mask]
+                    # 更新归一化值
+                    data["normalized_psd"] = data["psd"] / np.max(data["psd"]) if np.max(data["psd"]) > 0 else data["psd"]
+                else:
+                    # 没有截止，恢复原始数据
+                    data["frequencies"] = frequencies
+                    data["psd"] = psd
+                    data["normalized_psd"] = psd / np.max(psd) if np.max(psd) > 0 else psd
+                
+        # 更新比较图表
+        if has_updates:
+            self.update_compare_plot()
+            self.status_label.setText(f"Applied frequency cutoffs to selected curves")
+        else:
+            self.status_label.setText("No curves updated")
 
 
 # 兼容性别名类

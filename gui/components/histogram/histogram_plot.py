@@ -9,18 +9,39 @@ import numpy as np
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
 from matplotlib.figure import Figure
 import matplotlib.pyplot as plt
-from matplotlib.widgets import SpanSelector
+from matplotlib.widgets import SpanSelector, RectangleSelector
 import matplotlib.patches as patches
 from scipy import stats
+from scipy.optimize import curve_fit
+import matplotlib.gridspec as gridspec
+from PyQt6.QtCore import pyqtSignal, QTimer
+
+import numpy as np
+from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
+from matplotlib.figure import Figure
+import matplotlib.pyplot as plt
+from matplotlib.widgets import SpanSelector, RectangleSelector
+import matplotlib.patches as patches
+from scipy import stats
+from scipy.optimize import curve_fit
+import matplotlib.gridspec as gridspec
+from PyQt6.QtCore import pyqtSignal, QTimer
 
 
 class HistogramPlot(FigureCanvas):
     """直方图可视化画布"""
     
+    # 定义信号
+    region_selected = pyqtSignal(float, float)
+    
     def __init__(self, parent=None, width=8, height=6, dpi=100):
         self.fig = Figure(figsize=(width, height), dpi=dpi)
         super(HistogramPlot, self).__init__(self.fig)
         self.setParent(parent)
+        
+        # 保存父组件引用，这样可以访问拟合信息面板
+        self.parent_dialog = parent
+        print(f"HistogramPlot initialized with parent: {parent}")
         
         # 创建三个子图，按照要求布局
         self.setup_subplots()
@@ -446,6 +467,21 @@ class HistogramPlot(FigureCanvas):
                     invert_data=self.invert_data,
                     file_name=self.file_name
                 )
+                
+                # 如果是在subplot3直方图视图中，那么需要单独处理
+                if not hasattr(self, 'ax1'):
+                    # 获取高亮区域数据
+                    highlighted_data = -self.data[self.highlight_min:self.highlight_max] if self.invert_data else self.data[self.highlight_min:self.highlight_max]
+                    
+                    # 重新绘制subplot3直方图
+                    self.plot_subplot3_histogram(
+                        highlighted_data,
+                        bins=self.bins,
+                        log_x=self.log_x,
+                        log_y=self.log_y,
+                        show_kde=self.show_kde,
+                        file_name=self.file_name
+                    )
     
     def update_highlight_size(self, size_percent):
         """更新高亮区域大小"""
@@ -491,6 +527,506 @@ class HistogramPlot(FigureCanvas):
         # 重绘
         self.draw()
     
+    def plot_subplot3_histogram(self, data, bins=50, log_x=False, log_y=False, show_kde=False, file_name=""):
+        """创建一个单独的subplot3直方图视图"""
+        if data is None or len(data) == 0:
+            return
+            
+        # 清除当前figure
+        self.fig.clear()
+        
+        # 创建一个subplot
+        self.ax = self.fig.add_subplot(111)
+        
+        # 保存数据和显示参数
+        self.histogram_data = data
+        self.histogram_bins = bins
+        self.histogram_log_x = log_x
+        self.histogram_log_y = log_y
+        self.histogram_show_kde = show_kde
+        self.histogram_file_name = file_name
+        
+        # 初始化矩形选择器的优化定时器
+        if not hasattr(self, 'rect_select_timer'):
+            self.rect_select_timer = QTimer()
+            self.rect_select_timer.setSingleShot(True)
+            self.rect_select_timer.setInterval(800)  # 增加到800ms的延迟来降低卡顿
+            self.rect_select_timer.timeout.connect(self._delayed_rect_select)
+        self.pending_rect_coords = None
+        
+        # 初始化高斯拟合区域列表
+        if not hasattr(self, 'fit_regions'):
+            self.fit_regions = []
+        else:
+            self.fit_regions.clear()
+        
+        # 初始化高斯拟合结果列表
+        if not hasattr(self, 'gaussian_fits'):
+            self.gaussian_fits = []
+        else:
+            self.gaussian_fits.clear()
+            
+        # 当前高亮的拟合索引
+        self.highlighted_fit_index = -1
+        
+        # 设置标题
+        title = "Histogram of Highlighted Region"
+        if file_name:
+            title = f"{file_name} - {title}"
+        self.ax.set_title(title, fontsize=12)
+        
+        # 添加使用提示 - 放在右下角避免与标题重叠
+        msg = "Click and drag to select regions for Gaussian fitting"
+        self.ax.annotate(msg, xy=(0.98, 0.02), xycoords='figure fraction', 
+                    ha='right', va='bottom', fontsize=9, color='navy',
+                    bbox=dict(boxstyle='round', facecolor='lightyellow', alpha=0.8))
+        
+        # 设置坐标轴标签
+        self.ax.set_xlabel("Amplitude", fontsize=10)
+        self.ax.set_ylabel("Count", fontsize=10)
+        
+        # 设置对数轴（如果启用）
+        if log_x:
+            self.ax.set_xscale('log')
+        else:
+            self.ax.set_xscale('linear')
+            
+        if log_y:
+            self.ax.set_yscale('log')
+        else:
+            self.ax.set_yscale('linear')
+        
+        # 绘制直方图 - 调低透明度使背景更浅，并设置较低的zorder以使其位于数据后面
+        self.histogram = self.ax.hist(
+            data, 
+            bins=bins, 
+            alpha=0.5,
+            color='skyblue',
+            edgecolor='black',
+            zorder=5  # 设置较低的层级
+        )
+        
+        # 解析直方图数据
+        self.hist_counts = self.histogram[0]
+        self.hist_bin_edges = self.histogram[1]
+        self.hist_bin_centers = (self.hist_bin_edges[:-1] + self.hist_bin_edges[1:]) / 2
+        
+        # 绘制KDE曲线（如果启用）
+        if show_kde and len(np.unique(data)) > 1:
+            try:
+                # 计算KDE
+                density = stats.gaussian_kde(data)
+                
+                # 创建计算点
+                min_val = np.min(data)
+                max_val = np.max(data)
+                xs = np.linspace(min_val, max_val, 1000)
+                ys = density(xs)
+                
+                # 将KDE缩放以与hist高度匹配
+                bins_in_range = bins * (max_val - min_val) / (np.max(data) - np.min(data))
+                bin_width = (max_val - min_val) / bins_in_range
+                scaling_factor = bin_width * len(data)
+                ys = ys * scaling_factor
+                
+                # 绘制KDE曲线 - 将其放在直方图之上
+                self.ax.plot(xs, ys, 'r-', linewidth=2, label='KDE', zorder=10)
+                self.ax.legend()
+                
+            except Exception as e:
+                print(f"Error plotting KDE for subplot3: {e}")
+                import traceback
+                traceback.print_exc()
+        
+        # 添加网格线以便于阅读
+        self.ax.grid(True, linestyle='--', alpha=0.7)
+        
+        # 添加统计信息文本框
+        textstr = f"\n".join((
+            f"Count: {len(data)}",
+            f"Mean: {np.mean(data):.4f}",
+            f"Std Dev: {np.std(data):.4f}",
+            f"Min: {np.min(data):.4f}",
+            f"Max: {np.max(data):.4f}",
+            f"Median: {np.median(data):.4f}"
+        ))
+        
+        # 放置在图的右上角
+        props = dict(boxstyle='round', facecolor='wheat', alpha=0.5)
+        self.ax.text(0.95, 0.95, textstr, transform=self.ax.transAxes, fontsize=9,
+                verticalalignment='top', horizontalalignment='right', bbox=props)
+        
+        # 创建矩形选择器，允许框选区域进行高斯拟合
+        self.rect_selector = RectangleSelector(
+            self.ax,
+            self.on_rect_select,
+            useblit=True,
+            button=[1],  # 只使用左键
+            minspanx=10,  # 增加最小距离
+            minspany=10,  # 增加最小距离
+            spancoords='pixels',
+            interactive=False,  # 禁用交互式以减少卡顿
+            props=dict(facecolor='red', edgecolor='black', alpha=0.15, fill=True)
+        )
+        
+        # 初始化信息显示面板
+        # 不再创建setup_info_panel，因为我们现在使用单独的FitInfoPanel
+        # 只保留信息字符串用于其它功能
+        self.fit_info_str = "No fits yet"
+        
+        # 调整布局
+        self.fig.tight_layout()
+        
+        # 重绘
+        self.draw()
+        
+    def on_rect_select(self, eclick, erelease):
+        """处理矩形器的框选区域"""
+        try:
+            # 获取选择的x范围
+            x_min, x_max = sorted([eclick.xdata, erelease.xdata])
+            
+            # 使用延时定时器来减少卡顿
+            self.pending_rect_coords = (x_min, x_max)
+            self.rect_select_timer.start()
+            
+        except Exception as e:
+            print(f"Error in rectangle selector: {e}")
+            import traceback
+            traceback.print_exc()
+            
+    def _delayed_rect_select(self):
+        """延迟处理框选区域，以减少卡顿"""
+        if not self.pending_rect_coords:
+            return
+            
+        x_min, x_max = self.pending_rect_coords
+        
+        # 将坐标发送给相应的信号
+        self.region_selected.emit(x_min, x_max)
+        
+        # 高亮选择区域
+        self.highlight_selected_region(x_min, x_max)
+        
+        # 进行高斯拟合
+        self.fit_gaussian_to_selected_region(x_min, x_max)
+        
+        # 重置坐标
+        self.pending_rect_coords = None
+    
+    def highlight_selected_region(self, x_min, x_max):
+        """高亮框选的区域"""
+        # 添加到拟合区域列表
+        region = self.ax.axvspan(x_min, x_max, alpha=0.08, color='green', zorder=0)
+        self.fit_regions.append((x_min, x_max, region))
+    
+    def fit_gaussian_to_selected_region(self, x_min, x_max):
+        """对选择的区域进行高斯拟合"""
+        try:
+            # 获取数据在选择区域内的部分
+            mask = (self.histogram_data >= x_min) & (self.histogram_data <= x_max)
+            selected_data = self.histogram_data[mask]
+            
+            if len(selected_data) < 10:  # 至少需要足够的数据点进行拟合
+                print("Not enough data points for Gaussian fitting")
+                return
+            
+            # 取得箱子下标
+            bin_mask = (self.hist_bin_centers >= x_min) & (self.hist_bin_centers <= x_max)
+            x_data = self.hist_bin_centers[bin_mask]
+            y_data = self.hist_counts[bin_mask]
+            
+            if len(x_data) < 3:  # 至少需要足够的直方图点进行拟合
+                print("Not enough histogram bins for Gaussian fitting")
+                return
+                
+            # 高斯函数
+            def gaussian(x, amp, mu, sigma):
+                return amp * np.exp(-(x - mu)**2 / (2 * sigma**2))
+            
+            # 初始估计高斯参数: 振幅，均值，标准差
+            amp_init = y_data.max()  # 使用直方图的最大高度估计振幅
+            mean_init = np.mean(selected_data)
+            std_init = np.std(selected_data)
+            
+            # 添加边界约束以提高拟合稳定性
+            bounds = (
+                [0, x_min, 0],           # 下界: 振幅大于0，均值在选择区域内，标准差大于0
+                [amp_init*3, x_max, (x_max-x_min)]  # 上界: 振幅有合理限制，均值在选择区域内，标准差有合理限制
+            )
+            
+            p0 = [amp_init, mean_init, std_init]
+            
+            # 在图上创建微小的bin来拟合高斯曲线 - 减少点数以提高性能
+            x_fit = np.linspace(x_min, x_max, 150)
+            
+            # 拟合高斯函数并让其更应对拟合失败
+            try:
+                popt, _ = curve_fit(gaussian, x_data, y_data, p0=p0, bounds=bounds, maxfev=2000)
+                
+                # 计算指定高斯组件的颜色
+                colors = ['red', 'blue', 'purple', 'orange', 'green', 'magenta', 'cyan', 'brown', 'olive', 'teal']
+                color_idx = len(self.gaussian_fits) % len(colors)
+                fit_color = colors[color_idx]
+                
+                # 将拟合曲线绘到图上，使用颜色循环
+                y_fit = gaussian(x_fit, *popt)
+                line, = self.ax.plot(x_fit, y_fit, '-', linewidth=2.5, color=fit_color, zorder=15)
+                
+                # 创建文本标签显示拟合参数
+                amp, mu, sigma = popt
+                fwhm = 2.355 * sigma  # 半高宽计算
+                fit_num = len(self.gaussian_fits) + 1
+                text = f"G{fit_num}: μ={mu:.3f}, σ={sigma:.3f}"
+                
+                # 使用水平和垂直偏移来定位文本，更清晰
+                # 使用与曲线相同的颜色
+                text_obj = self.ax.text(mu, amp*1.05, text, ha='center', va='bottom', fontsize=9,
+                    bbox=dict(facecolor='white', alpha=0.8, edgecolor=fit_color, boxstyle='round'),
+                    color=fit_color, zorder=20)
+                
+                # 将拟合参数添加到列表
+                self.gaussian_fits.append({
+                    'popt': popt,
+                    'x_range': (x_min, x_max),
+                    'line': line,
+                    'text': text_obj,
+                    'color': fit_color
+                })
+                
+                # 添加到拟合信息面板（如果存在）
+                if hasattr(self, 'parent_dialog') and self.parent_dialog and hasattr(self.parent_dialog, 'fit_info_panel'):
+                    print(f"Adding fit to panel: {len(self.gaussian_fits)}, {amp:.2f}, {mu:.4f}, {sigma:.4f}")
+                    self.parent_dialog.fit_info_panel.add_fit(len(self.gaussian_fits), amp, mu, sigma, (x_min, x_max), fit_color)
+                
+                # 收集拟合信息字符串
+                # 全部拟合信息
+                self.update_fit_info_string()
+                
+                # 重绘
+                self.draw()
+                
+            except RuntimeError as e:
+                print(f"Error fitting Gaussian: {e}")
+                
+        except Exception as e:
+            print(f"Error in Gaussian fitting: {e}")
+            import traceback
+            traceback.print_exc()
+    
+    def update_fit_info_string(self):
+        """更新拟合信息字符串(用于导出和复制)"""
+        if not hasattr(self, 'gaussian_fits') or len(self.gaussian_fits) == 0:
+            self.fit_info_str = "No fits yet"
+            return
+            
+        # 创建拟合信息字符串，包含半高宽（FWHM）
+        info_lines = ["===== Fitting Results ====="]
+        for i, fit in enumerate(self.gaussian_fits):
+            amp, mu, sigma = fit['popt']
+            fwhm = 2.355 * sigma  # 计算半高宽（FWHM）
+            info_lines.append(f"Gaussian {i+1}:")
+            info_lines.append(f"  Peak position: {mu:.4f}")
+            info_lines.append(f"  Amplitude: {amp:.2f}")
+            info_lines.append(f"  Sigma: {sigma:.4f}")
+            info_lines.append(f"  FWHM: {fwhm:.4f}")
+            info_lines.append(f"  Range: {fit['x_range'][0]:.3f}-{fit['x_range'][1]:.3f}")
+            info_lines.append("")
+        
+        # 计算总结
+        if len(self.gaussian_fits) > 1:
+            info_lines.append("==== Multi-Peak Analysis ====")
+            peaks = [fit['popt'][1] for fit in self.gaussian_fits]
+            # 计算相邻峰之间的距离
+            sorted_peaks = sorted(peaks)
+            for i in range(len(sorted_peaks)-1):
+                delta = sorted_peaks[i+1] - sorted_peaks[i]
+                info_lines.append(f"Peak{i+1} to Peak{i+2} distance: {delta:.4f}")
+            
+        self.fit_info_str = "\n".join(info_lines)
+    
+    def clear_fits(self):
+        """清除所有高斯拟合"""
+        try:
+            if hasattr(self, 'gaussian_fits'):
+                # 删除所有拟合曲线和文本
+                for fit in self.gaussian_fits:
+                    if 'line' in fit and fit['line'] in self.ax.lines:
+                        fit['line'].remove()
+                    if 'text' in fit:
+                        fit['text'].remove()
+                self.gaussian_fits.clear()
+            
+            if hasattr(self, 'fit_regions'):
+                # 删除所有区域高亮
+                for _, _, region in self.fit_regions:
+                    if region in self.ax.patches:
+                        region.remove()
+                self.fit_regions.clear()
+            
+            # 重置拟合信息字符串
+            self.fit_info_str = "No fits yet"
+            
+            # 清除拟合信息面板
+            if hasattr(self, 'parent_dialog') and self.parent_dialog and hasattr(self.parent_dialog, 'fit_info_panel'):
+                self.parent_dialog.fit_info_panel.clear_all_fits()
+            
+            # 重绘
+            self.draw()
+            
+        except Exception as e:
+            print(f"Error clearing fits: {e}")
+            import traceback
+            traceback.print_exc()
+    
+    def delete_specific_fit(self, fit_index):
+        """删除特定的拟合"""
+        try:
+            if not hasattr(self, 'gaussian_fits'):
+                return
+                
+            # 查找对应索引的拟合
+            for i, fit in enumerate(self.gaussian_fits):
+                if len(self.gaussian_fits) == fit_index or i+1 == fit_index:  # 支持以集合索引或显示索引查找
+                    # 移除环境中的元素
+                    if 'line' in fit and fit['line'] in self.ax.lines:
+                        fit['line'].remove()
+                    if 'text' in fit:
+                        fit['text'].remove()
+                    
+                    # 移除相关的区域高亮
+                    for j, (x_min, x_max, region) in enumerate(self.fit_regions):
+                        if j == i:  # 假设区域和拟合是一一对应的
+                            if region in self.ax.patches:
+                                region.remove()
+                            self.fit_regions.pop(j)
+                            break
+                    
+                    # 从列表中移除
+                    self.gaussian_fits.pop(i)
+                    
+                    # 重新绘制
+                    self.draw()
+                    return True
+            
+            return False  # 返回是否成功删除
+                
+        except Exception as e:
+            print(f"Error in delete_specific_fit: {e}")
+            import traceback
+            traceback.print_exc()
+            return False
+    
+    def update_specific_fit(self, fit_index, new_params):
+        """更新特定拟合的参数"""
+        try:
+            if not hasattr(self, 'gaussian_fits'):
+                return False
+                
+            # 查找对应索引的拟合
+            for i, fit in enumerate(self.gaussian_fits):
+                if len(self.gaussian_fits) == fit_index or i+1 == fit_index:  # 支持以集合索引或显示索引查找
+                    # 获取当前拟合的x范围
+                    x_range = fit['x_range']
+                    color = fit['color']
+                    
+                    # 定义高斯函数
+                    def gaussian(x, amp, mu, sigma):
+                        return amp * np.exp(-(x - mu)**2 / (2 * sigma**2))
+                    
+                    # 更新拟合参数
+                    amp = new_params['amp']
+                    mu = new_params['mu']
+                    sigma = new_params['sigma']
+                    
+                    # 计算新的拟合曲线
+                    x_fit = np.linspace(x_range[0], x_range[1], 150)
+                    y_fit = gaussian(x_fit, amp, mu, sigma)
+                    
+                    # 移除旧的曲线和文本
+                    if 'line' in fit and fit['line'] in self.ax.lines:
+                        fit['line'].remove()
+                    if 'text' in fit:
+                        fit['text'].remove()
+                    
+                    # 创建新的曲线和文本
+                    line, = self.ax.plot(x_fit, y_fit, '-', linewidth=2.5, color=color, zorder=15)
+                    
+                    # 更新呈现参数
+                    fit_num = i + 1
+                    text = f"G{fit_num}: μ={mu:.3f}, σ={sigma:.3f}"
+                    text_obj = self.ax.text(mu, amp*1.05, text, ha='center', va='bottom', fontsize=9,
+                        bbox=dict(facecolor='white', alpha=0.8, edgecolor=color, boxstyle='round'),
+                        color=color, zorder=20)
+                    
+                    # 更新拟合对象
+                    self.gaussian_fits[i] = {
+                        'popt': (amp, mu, sigma),
+                        'x_range': x_range,
+                        'line': line,
+                        'text': text_obj,
+                        'color': color
+                    }
+                    
+                    # 更新拟合信息字符串
+                    self.update_fit_info_string()
+                    
+                    # 更新拟合信息面板(如果存在)
+                    if hasattr(self, 'parent_dialog') and self.parent_dialog and hasattr(self.parent_dialog, 'fit_info_panel'):
+                        self.parent_dialog.fit_info_panel.update_fit(fit_num, amp, mu, sigma, x_range, color)
+                    
+                    # 重新绘制
+                    self.draw()
+                    return True
+            
+            return False  # 返回是否成功更新
+                
+        except Exception as e:
+            print(f"Error in update_specific_fit: {e}")
+            import traceback
+            traceback.print_exc()
+            return False
+    
+    def highlight_specific_fit(self, fit_index):
+        """高亮显示特定的拟合"""
+        try:
+            if not hasattr(self, 'gaussian_fits'):
+                return False
+                
+            # 取消之前的高亮
+            if self.highlighted_fit_index >= 0 and self.highlighted_fit_index < len(self.gaussian_fits):
+                old_fit = self.gaussian_fits[self.highlighted_fit_index]
+                if 'line' in old_fit:
+                    old_fit['line'].set_linewidth(2.5)  # 恢复正常线宽
+                
+            # 查找对应索引的拟合
+            actual_index = -1
+            for i, fit in enumerate(self.gaussian_fits):
+                if len(self.gaussian_fits) == fit_index or i+1 == fit_index:  # 支持以集合索引或显示索引查找
+                    # 高亮显示该拟合
+                    if 'line' in fit:
+                        fit['line'].set_linewidth(4.0)  # 增加线宽高亮显示
+                    
+                    # 记录当前高亮的索引
+                    self.highlighted_fit_index = i
+                    actual_index = i
+                    break
+            
+            # 重新绘制
+            if actual_index >= 0:
+                self.draw()
+                return True
+            else:
+                self.highlighted_fit_index = -1
+                return False
+                
+        except Exception as e:
+            print(f"Error in highlight_specific_fit: {e}")
+            import traceback
+            traceback.print_exc()
+            self.highlighted_fit_index = -1
+            return False
+        
     def move_highlight(self, position_percent):
         """移动高亮区域位置"""
         if self.data is None:

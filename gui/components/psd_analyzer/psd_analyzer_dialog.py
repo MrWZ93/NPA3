@@ -1070,17 +1070,32 @@ class PSDAnalyzerDialog(QDialog):
         
         # 获取保存格式选择
         formats = ["CSV (*.csv)", "JSON (*.json)", "NPY Binary (*.npy)"]
-        selected_format, ok = QMessageBox.question(
-            self, "Export Format", 
-            "Select export format:", 
-            *formats, 
-            QMessageBox.StandardButton.Cancel
-        )
+        format_buttons = QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No | QMessageBox.StandardButton.Discard | QMessageBox.StandardButton.Cancel
+        msg_box = QMessageBox(QMessageBox.Icon.Question, "Export Format", "Select export format:", format_buttons, self)
         
-        if selected_format == QMessageBox.StandardButton.Cancel or not ok:
+        # 设置按钮文本
+        msg_box.button(QMessageBox.StandardButton.Yes).setText(formats[0])
+        msg_box.button(QMessageBox.StandardButton.No).setText(formats[1])
+        msg_box.button(QMessageBox.StandardButton.Discard).setText(formats[2])
+        
+        # 显示对话框
+        selected_format = msg_box.exec()
+        
+        # 检查结果
+        ok = selected_format != QMessageBox.StandardButton.Cancel
+        
+        if not ok:
             return
-            
-        format_idx = formats.index(selected_format.text())
+        
+        # 确定选择的格式索引
+        if selected_format == QMessageBox.StandardButton.Yes:
+            format_idx = 0  # CSV
+        elif selected_format == QMessageBox.StandardButton.No:
+            format_idx = 1  # JSON
+        elif selected_format == QMessageBox.StandardButton.Discard:
+            format_idx = 2  # NPY
+        else:
+            return  # 其他情况，如关闭对话框
         
         # 获取保存路径
         default_name = f"psd_data{cutoff_text}"

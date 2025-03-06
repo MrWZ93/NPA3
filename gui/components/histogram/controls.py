@@ -23,6 +23,7 @@ class HistogramControlPanel(QWidget):
     log_y_changed = pyqtSignal(bool)
     kde_changed = pyqtSignal(bool)
     invert_data_changed = pyqtSignal(bool)
+    clear_fits_requested = pyqtSignal()  # 清除高斯拟合信号
     
     def __init__(self, parent=None):
         super(HistogramControlPanel, self).__init__(parent)
@@ -92,6 +93,11 @@ class HistogramControlPanel(QWidget):
         self.invert_data_check.setToolTip("Invert the data values (multiply by -1)")
         self.invert_data_check.setChecked(False)  # 默认不勾选
         
+        # 清除高斯拟合按钮
+        self.clear_fits_btn = QPushButton("Clear Fits")
+        self.clear_fits_btn.setToolTip("Clear all Gaussian fits")
+        self.clear_fits_btn.setFixedWidth(80)
+        
         # 添加所有选项到布局
         top_layout.addLayout(bins_layout)
         top_layout.addStretch(1)  # 添加弹性空间使复选框靠右
@@ -99,6 +105,7 @@ class HistogramControlPanel(QWidget):
         top_layout.addWidget(self.log_y_check)
         top_layout.addWidget(self.kde_check)
         top_layout.addWidget(self.invert_data_check)
+        top_layout.addWidget(self.clear_fits_btn)
         
         hist_layout.addLayout(top_layout)
         
@@ -158,6 +165,9 @@ class HistogramControlPanel(QWidget):
         
         # 数据取反选项
         self.invert_data_check.stateChanged.connect(self.on_invert_data_changed)
+        
+        # 清除高斯拟合按钮
+        self.clear_fits_btn.clicked.connect(self.on_clear_fits_clicked)
     
     def on_size_slider_moved(self, value):
         """处理滑块移动事件并使用延时优化"""
@@ -220,6 +230,10 @@ class HistogramControlPanel(QWidget):
     def set_highlight_position(self, value):
         """设置高亮区域位置百分比"""
         self.highlight_position_slider.setValue(value)
+        
+    def on_clear_fits_clicked(self):
+        """处理清除高斯拟合按钮点击"""
+        self.clear_fits_requested.emit()
 
 
 class FileChannelControl(QWidget):

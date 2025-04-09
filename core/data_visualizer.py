@@ -189,10 +189,15 @@ class DataVisualizer(FigureCanvas):
                     # 使用时间数据作为X轴（如果有），否则生成时间轴
                     try:
                         if time_data is not None and len(time_data) == len(values):
-                            ax.plot(time_data, values)
+                            # 如果有时间数据，计算相对时间（从0开始）
+                            time_offset = time_data[0] if len(time_data) > 0 else 0
+                            relative_time = time_data - time_offset
+                            
+                            # 使用相对时间绘制，使图形从0开始
+                            ax.plot(relative_time, values)
                             # 使用真实时间数据时，需要设置X轴标签
                             if i == num_channels - 1 or not self.sync_mode:  # 只在底部图或非同步图中显示X轴标签
-                                ax.set_xlabel("Time", fontsize=10, fontweight='bold')
+                                ax.set_xlabel("Time (s)", fontsize=10, fontweight='bold')
                         else:
                             # 生成基于采样率的时间轴
                             time_axis = np.arange(len(values)) / self.sampling_rate

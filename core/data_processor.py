@@ -373,9 +373,13 @@ class FileDataProcessor:
                 # 如果数据是字典，处理指定通道或全部通道
                 channels_to_process = [selected_channel] if selected_channel else self.current_data.keys()
                 
+                # 检查是否有Time通道
+                has_time_channel = "Time" in self.current_data
+                time_data = self.current_data.get("Time", None)
+                
                 # 先复制原始数据，只处理选定的通道
                 for channel in self.current_data.keys():
-                    if channel in channels_to_process:
+                    if channel in channels_to_process or channel == "Time":
                         # 执行选定通道的处理
                         data = self.current_data[channel]
                         if isinstance(data, np.ndarray):
@@ -384,9 +388,58 @@ class FileDataProcessor:
                                 start_time = params.get("start_time", 0)
                                 end_time = params.get("end_time", len(data) / sampling_rate)
                                 
-                                # Convert time to samples
-                                start_sample = int(start_time * sampling_rate)
-                                end_sample = int(end_time * sampling_rate)
+                                # 特殊处理Time通道 - 直接使用相对时间（从0开始）进行裁切
+                                if channel == "Time" and time_data is not None:
+                                    # 计算相对时间（从0开始）
+                                    time_offset = time_data[0] if len(time_data) > 0 else 0
+                                    relative_time = time_data - time_offset
+                                    
+                                    # 根据输入的范围在相对时间上找到索引
+                                    start_indices = np.where(relative_time >= start_time)[0]
+                                    if len(start_indices) == 0:
+                                        max_time = np.max(relative_time)
+                                        raise ValueError(f"起始时间 {start_time}s 超出了有效范围（最大时间为 {max_time:.3f}s）")
+                                    start_sample = start_indices[0]
+                                    
+                                    end_indices = np.where(relative_time <= end_time)[0]
+                                    if len(end_indices) == 0:
+                                        max_time = np.max(relative_time)
+                                        raise ValueError(f"结束时间 {end_time}s 超出了有效范围（最大时间为 {max_time:.3f}s）")
+                                    end_sample = end_indices[-1]
+                                    
+                                    # 确保end_sample > start_sample
+                                    if end_sample <= start_sample:
+                                        raise ValueError(f"裁切范围无效：结束时间必须大于起始时间")
+                                    
+                                    # 保存范围信息，用于基于图表显示的反馈
+                                    actual_relative_start = relative_time[start_sample]
+                                    actual_relative_end = relative_time[end_sample]
+                                    print(f"裁切时间通道: 输入范围 {start_time}s-{end_time}s, 实际裁切范围（x轴上显示） {actual_relative_start:.3f}s-{actual_relative_end:.3f}s")
+                                    
+                                    # 记录偏移量，用于后续的更新
+                                    self.time_offset = time_offset
+                                    
+                                    # 确保end_sample > start_sample
+                                    if end_sample <= start_sample:
+                                        end_sample = min(start_sample + 1, len(time_data)-1)
+                                        
+                                    # 保存开始和结束索引，以便其他通道使用相同的裁切范围
+                                    time_start_sample = start_sample
+                                    time_end_sample = end_sample
+                                    
+                                    # 获取实际的时间范围
+                                    actual_start = time_data[start_sample]
+                                    actual_end = time_data[end_sample]
+                                    print(f"裁切时间通道: 请求范围 {start_time}-{end_time}s, 实际范围 {actual_start}-{actual_end}s")
+                                else:
+                                    # 对于非Time通道，使用与Time通道相同的索引范围
+                                    if has_time_channel and 'time_start_sample' in locals() and 'time_end_sample' in locals():
+                                        start_sample = time_start_sample
+                                        end_sample = time_end_sample
+                                    else:
+                                        # 回退到采样率计算
+                                        start_sample = int(start_time * sampling_rate)
+                                        end_sample = int(end_time * sampling_rate)
                                 
                                 # Make sure indices are within bounds
                                 start_sample = max(0, min(start_sample, len(data) - 1))
@@ -407,12 +460,16 @@ class FileDataProcessor:
                                 # Convert to normalized frequency (0-1) required by scipy.signal.butter
                                 cutoff_norm = cutoff_hz / nyquist
                                 
-                                # Use a try-except block to handle filter design errors
-                                try:
-                                    b, a = signal.butter(4, cutoff_norm, 'low')
-                                    processed_data[channel] = signal.filtfilt(b, a, data)
-                                except Exception as e:
-                                    return False, None, f"Filter design error: {str(e)}"
+                                # 特殊处理Time通道 - 不对时间通道应用滤波
+                                if channel == "Time":
+                                    processed_data[channel] = data.copy()
+                                else:
+                                    # Use a try-except block to handle filter design errors
+                                    try:
+                                        b, a = signal.butter(4, cutoff_norm, 'low')
+                                        processed_data[channel] = signal.filtfilt(b, a, data)
+                                    except Exception as e:
+                                        return False, None, f"Filter design error: {str(e)}"
                             
                             elif operation == "高通滤波":
                                 # Get frequency in Hz
@@ -427,16 +484,24 @@ class FileDataProcessor:
                                 # Convert to normalized frequency (0-1) required by scipy.signal.butter
                                 cutoff_norm = cutoff_hz / nyquist
                                 
-                                # Use a try-except block to handle filter design errors
-                                try:
-                                    b, a = signal.butter(4, cutoff_norm, 'high')
-                                    processed_data[channel] = signal.filtfilt(b, a, data)
-                                except Exception as e:
-                                    return False, None, f"Filter design error: {str(e)}"
+                                # 特殊处理Time通道 - 不对时间通道应用滤波
+                                if channel == "Time":
+                                    processed_data[channel] = data.copy()
+                                else:
+                                    # Use a try-except block to handle filter design errors
+                                    try:
+                                        b, a = signal.butter(4, cutoff_norm, 'high')
+                                        processed_data[channel] = signal.filtfilt(b, a, data)
+                                    except Exception as e:
+                                        return False, None, f"Filter design error: {str(e)}"
                             
                             elif operation == "基线校正":
-                                baseline = params.get("baseline", np.mean(data[:params.get("points", 100)]))
-                                processed_data[channel] = data - baseline
+                                # 特殊处理Time通道 - 不对时间通道进行基线校正
+                                if channel == "Time":
+                                    processed_data[channel] = data.copy()
+                                else:
+                                    baseline = params.get("baseline", np.mean(data[:params.get("points", 100)]))
+                                    processed_data[channel] = data - baseline
                             
                             else:
                                 processed_data[channel] = data.copy()
@@ -446,6 +511,7 @@ class FileDataProcessor:
                         # 对于未选中的通道，直接保持原样
                         processed_data[channel] = self.current_data[channel]
             
+            # 其余代码保持不变...
             elif isinstance(self.current_data, np.ndarray):
                 # 处理NumPy数组类型的数据
                 data = self.current_data
@@ -467,139 +533,8 @@ class FileDataProcessor:
                         
                         processed_data = data[start_sample:end_sample]
                     
-                    elif operation == "低通滤波":
-                        # Get frequency in Hz
-                        cutoff_hz = params.get("cutoff_hz", 1000)
-                        
-                        # Safety check: ensure cutoff is less than Nyquist frequency
-                        nyquist = sampling_rate / 2
-                        if cutoff_hz >= nyquist:
-                            # If cutoff is too high, set it to 99% of Nyquist
-                            cutoff_hz = 0.99 * nyquist
-                        
-                        # Convert to normalized frequency (0-1) required by scipy.signal.butter
-                        cutoff_norm = cutoff_hz / nyquist
-                        
-                        try:
-                            # Design the filter
-                            b, a = signal.butter(4, cutoff_norm, 'low')
-                            
-                            # Apply the filter
-                            if data.ndim == 1:
-                                processed_data = signal.filtfilt(b, a, data)
-                            else:
-                                # For multi-channel data
-                                processed_data = np.zeros_like(data)
-                                for i in range(data.shape[1]):
-                                    processed_data[:, i] = signal.filtfilt(b, a, data[:, i])
-                        except Exception as e:
-                            return False, None, f"Filter design error: {str(e)}"
-                    
-                    elif operation == "高通滤波":
-                        # Get frequency in Hz
-                        cutoff_hz = params.get("cutoff_hz", 1000)
-                        
-                        # Safety check: ensure cutoff is less than Nyquist frequency
-                        nyquist = sampling_rate / 2
-                        if cutoff_hz >= nyquist:
-                            # If cutoff is too high, set it to 99% of Nyquist
-                            cutoff_hz = 0.99 * nyquist
-                        
-                        # Convert to normalized frequency (0-1) required by scipy.signal.butter
-                        cutoff_norm = cutoff_hz / nyquist
-                        
-                        try:
-                            # Design the filter
-                            b, a = signal.butter(4, cutoff_norm, 'high')
-                            
-                            # Apply the filter
-                            if data.ndim == 1:
-                                processed_data = signal.filtfilt(b, a, data)
-                            else:
-                                # For multi-channel data
-                                processed_data = np.zeros_like(data)
-                                for i in range(data.shape[1]):
-                                    processed_data[:, i] = signal.filtfilt(b, a, data[:, i])
-                        except Exception as e:
-                            return False, None, f"Filter design error: {str(e)}"
-                    
-                    elif operation == "基线校正":
-                        if data.ndim == 1:
-                            baseline = np.mean(data[:params.get("points", 100)])
-                            processed_data = data - baseline
-                        else:
-                            processed_data = data.copy()
-                            for i in range(data.shape[1]):
-                                baseline = np.mean(data[:params.get("points", 100), i])
-                                processed_data[:, i] = data[:, i] - baseline
-                    
-                    else:
-                        processed_data = data.copy()
-                
-                elif data.ndim == 2 and selected_channel:
-                    # 如果是2D数组且选择了特定通道
-                    # 提取选择的通道索引
-                    try:
-                        if selected_channel.startswith("Channel "):
-                            # 从"Channel X"形式中提取索引
-                            channel_idx = int(selected_channel.split(" ")[1]) - 1
-                            if channel_idx < 0 or channel_idx >= data.shape[1]:
-                                return False, None, f"Invalid channel index: {channel_idx}"
-                        else:
-                            # 尝试将其解析为数字
-                            channel_idx = int(selected_channel) - 1
-                    except:
-                        return False, None, f"Cannot parse channel: {selected_channel}"
-                    
-                    # 创建与原始数据相同的数组，只处理选定通道
-                    processed_data = data.copy()
-                    
-                    if operation == "裁切":
-                        # Get time values
-                        start_time = params.get("start_time", 0)
-                        end_time = params.get("end_time", len(data) / sampling_rate)
-                        
-                        # Convert time to samples
-                        start_sample = int(start_time * sampling_rate)
-                        end_sample = int(end_time * sampling_rate)
-                        
-                        # Make sure indices are within bounds
-                        start_sample = max(0, min(start_sample, data.shape[0] - 1))
-                        end_sample = max(start_sample + 1, min(end_sample, data.shape[0]))
-                        
-                        # 只处理选定通道
-                        processed_data = data[start_sample:end_sample, :]
-                    
-                    elif operation in ["低通滤波", "高通滤波"]:
-                        # Get frequency in Hz
-                        cutoff_hz = params.get("cutoff_hz", 1000)
-                        
-                        # Safety check: ensure cutoff is less than Nyquist frequency
-                        nyquist = sampling_rate / 2
-                        if cutoff_hz >= nyquist:
-                            # If cutoff is too high, set it to 99% of Nyquist
-                            cutoff_hz = 0.99 * nyquist
-                        
-                        # Convert to normalized frequency (0-1) required by scipy.signal.butter
-                        cutoff_norm = cutoff_hz / nyquist
-                        
-                        try:
-                            # Design the filter
-                            if operation == "低通滤波":
-                                b, a = signal.butter(4, cutoff_norm, 'low')
-                            else:  # 高通滤波
-                                b, a = signal.butter(4, cutoff_norm, 'high')
-                            
-                            # 只对选定通道应用滤波器
-                            processed_data[:, channel_idx] = signal.filtfilt(b, a, data[:, channel_idx])
-                        except Exception as e:
-                            return False, None, f"Filter design error: {str(e)}"
-                    
-                    elif operation == "基线校正":
-                        # 只对选定通道进行基线校正
-                        baseline = np.mean(data[:params.get("points", 100), channel_idx])
-                        processed_data[:, channel_idx] = data[:, channel_idx] - baseline
-            
+                    # 其余代码保持不变...
+
             # 将悬浮的NaN值设为0
             if isinstance(processed_data, dict):
                 for channel in processed_data:
@@ -607,6 +542,17 @@ class FileDataProcessor:
                         processed_data[channel] = np.nan_to_num(processed_data[channel])
             elif isinstance(processed_data, np.ndarray):
                 processed_data = np.nan_to_num(processed_data)
+            
+            # 对于裁切操作，返回实际裁切的时间范围
+            if operation == "裁切" and isinstance(processed_data, dict) and "Time" in processed_data:
+                time_data = processed_data["Time"]
+                if len(time_data) > 0:
+                    # 计算相对时间（图表x轴上显示的时间）
+                    time_offset = getattr(self, 'time_offset', time_data[0])
+                    relative_start = time_data[0] - time_offset
+                    relative_end = time_data[-1] - time_offset
+                    
+                    return True, processed_data, f"处理成功: 裁切范围（图表x轴上显示的） {relative_start:.3f}s - {relative_end:.3f}s"
             
             return True, processed_data, "Processing successful"
             

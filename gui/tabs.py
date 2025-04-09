@@ -466,6 +466,15 @@ class ProcessingTab(QWidget):
         # 设置下拉框的最小宽度
         self.operation_combo.setMinimumWidth(200)
         self.channel_combo.setMinimumWidth(200)
+
+        # # 时间模式选择已移动到参数配置中
+        # self.time_mode_layout = QHBoxLayout()
+        # self.time_mode_label = QLabel("时间模式:")
+        # self.time_mode_combo = QComboBox()
+        # self.time_mode_combo.addItem("相对时间 (从0开始计算)", "relative")
+        # self.time_mode_combo.addItem("绝对时间 (使用原始时间)", "absolute")
+        # self.time_mode_layout.addWidget(self.time_mode_label)
+        # self.time_mode_layout.addWidget(self.time_mode_combo)
         
         # 操作按钮
         # 创建美观的按钮
@@ -500,6 +509,7 @@ class ProcessingTab(QWidget):
             "High-pass Filter": "高通滤波", 
             "Baseline Correction": "基线校正"
         }
+
     
     def on_operation_changed(self, index):
         """操作类型变更处理"""
@@ -521,6 +531,12 @@ class ProcessingTab(QWidget):
         
         # 根据操作类型添加相应参数控件
         if self.current_operation == "裁切":  # Trim
+            # 添加时间范围说明标签
+            time_range_label = QLabel("Select time range based on x-axis values (0-based)")
+            time_range_label.setStyleSheet("color: #0078d7; font-style: italic;")
+            self.params_layout.addRow("", time_range_label)
+            
+            # 时间范围输入控件
             start_spin = QDoubleSpinBox()
             start_spin.setRange(0, 1000000)
             start_spin.setValue(0)
@@ -570,7 +586,12 @@ class ProcessingTab(QWidget):
         params = {}
         # 添加所有通用参数
         for key, widget in self.param_widgets.items():
-            params[key] = widget.value()
+            # QComboBox需要特殊处理来获取数据值
+            if isinstance(widget, QComboBox):
+                data_index = widget.currentIndex()
+                params[key] = widget.itemData(data_index)
+            else:
+                params[key] = widget.value()
         
         # 添加通道选择参数
         selected_channel = self.channel_combo.currentText()
@@ -578,3 +599,4 @@ class ProcessingTab(QWidget):
             params["channel"] = selected_channel
         
         return params
+

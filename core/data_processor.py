@@ -510,8 +510,7 @@ class FileDataProcessor:
                     else:
                         # 对于未选中的通道，直接保持原样
                         processed_data[channel] = self.current_data[channel]
-            
-            # 其余代码保持不变...
+
             elif isinstance(self.current_data, np.ndarray):
                 # 处理NumPy数组类型的数据
                 data = self.current_data
@@ -533,7 +532,138 @@ class FileDataProcessor:
                         
                         processed_data = data[start_sample:end_sample]
                     
-                    # 其余代码保持不变...
+                    elif operation == "低通滤波":
+                        # Get frequency in Hz
+                        cutoff_hz = params.get("cutoff_hz", 1000)
+                        
+                        # Safety check: ensure cutoff is less than Nyquist frequency
+                        nyquist = sampling_rate / 2
+                        if cutoff_hz >= nyquist:
+                            # If cutoff is too high, set it to 99% of Nyquist
+                            cutoff_hz = 0.99 * nyquist
+                        
+                        # Convert to normalized frequency (0-1) required by scipy.signal.butter
+                        cutoff_norm = cutoff_hz / nyquist
+                        
+                        try:
+                            # Design the filter
+                            b, a = signal.butter(4, cutoff_norm, 'low')
+                            
+                            # Apply the filter
+                            if data.ndim == 1:
+                                processed_data = signal.filtfilt(b, a, data)
+                            else:
+                                # For multi-channel data
+                                processed_data = np.zeros_like(data)
+                                for i in range(data.shape[1]):
+                                    processed_data[:, i] = signal.filtfilt(b, a, data[:, i])
+                        except Exception as e:
+                            return False, None, f"Filter design error: {str(e)}"
+                    
+                    elif operation == "高通滤波":
+                        # Get frequency in Hz
+                        cutoff_hz = params.get("cutoff_hz", 1000)
+                        
+                        # Safety check: ensure cutoff is less than Nyquist frequency
+                        nyquist = sampling_rate / 2
+                        if cutoff_hz >= nyquist:
+                            # If cutoff is too high, set it to 99% of Nyquist
+                            cutoff_hz = 0.99 * nyquist
+                        
+                        # Convert to normalized frequency (0-1) required by scipy.signal.butter
+                        cutoff_norm = cutoff_hz / nyquist
+                        
+                        try:
+                            # Design the filter
+                            b, a = signal.butter(4, cutoff_norm, 'high')
+                            
+                            # Apply the filter
+                            if data.ndim == 1:
+                                processed_data = signal.filtfilt(b, a, data)
+                            else:
+                                # For multi-channel data
+                                processed_data = np.zeros_like(data)
+                                for i in range(data.shape[1]):
+                                    processed_data[:, i] = signal.filtfilt(b, a, data[:, i])
+                        except Exception as e:
+                            return False, None, f"Filter design error: {str(e)}"
+                    
+                    elif operation == "基线校正":
+                        if data.ndim == 1:
+                            baseline = np.mean(data[:params.get("points", 100)])
+                            processed_data = data - baseline
+                        else:
+                            processed_data = data.copy()
+                            for i in range(data.shape[1]):
+                                baseline = np.mean(data[:params.get("points", 100), i])
+                                processed_data[:, i] = data[:, i] - baseline
+                    
+                    else:
+                        processed_data = data.copy()
+                
+                elif data.ndim == 2 and selected_channel:
+                    # 如果是2D数组且选择了特定通道
+                    # 提取选择的通道索引
+                    try:
+                        if selected_channel.startswith("Channel "):
+                            # 从"Channel X"形式中提取索引
+                            channel_idx = int(selected_channel.split(" ")[1]) - 1
+                            if channel_idx < 0 or channel_idx >= data.shape[1]:
+                                return False, None, f"Invalid channel index: {channel_idx}"
+                        else:
+                            # 尝试将其解析为数字
+                            channel_idx = int(selected_channel) - 1
+                    except:
+                        return False, None, f"Cannot parse channel: {selected_channel}"
+                    
+                    # 创建与原始数据相同的数组，只处理选定通道
+                    processed_data = data.copy()
+                    
+                    if operation == "裁切":
+                        # Get time values
+                        start_time = params.get("start_time", 0)
+                        end_time = params.get("end_time", len(data) / sampling_rate)
+                        
+                        # Convert time to samples
+                        start_sample = int(start_time * sampling_rate)
+                        end_sample = int(end_time * sampling_rate)
+                        
+                        # Make sure indices are within bounds
+                        start_sample = max(0, min(start_sample, data.shape[0] - 1))
+                        end_sample = max(start_sample + 1, min(end_sample, data.shape[0]))
+                        
+                        # 只处理选定通道
+                        processed_data = data[start_sample:end_sample, :]
+                    
+                    elif operation in ["低通滤波", "高通滤波"]:
+                        # Get frequency in Hz
+                        cutoff_hz = params.get("cutoff_hz", 1000)
+                        
+                        # Safety check: ensure cutoff is less than Nyquist frequency
+                        nyquist = sampling_rate / 2
+                        if cutoff_hz >= nyquist:
+                            # If cutoff is too high, set it to 99% of Nyquist
+                            cutoff_hz = 0.99 * nyquist
+                        
+                        # Convert to normalized frequency (0-1) required by scipy.signal.butter
+                        cutoff_norm = cutoff_hz / nyquist
+                        
+                        try:
+                            # Design the filter
+                            if operation == "低通滤波":
+                                b, a = signal.butter(4, cutoff_norm, 'low')
+                            else:  # 高通滤波
+                                b, a = signal.butter(4, cutoff_norm, 'high')
+                            
+                            # 只对选定通道应用滤波器
+                            processed_data[:, channel_idx] = signal.filtfilt(b, a, data[:, channel_idx])
+                        except Exception as e:
+                            return False, None, f"Filter design error: {str(e)}"
+                    
+                    elif operation == "基线校正":
+                        # 只对选定通道进行基线校正
+                        baseline = np.mean(data[:params.get("points", 100), channel_idx])
+                        processed_data[:, channel_idx] = data[:, channel_idx] - baseline
 
             # 将悬浮的NaN值设为0
             if isinstance(processed_data, dict):

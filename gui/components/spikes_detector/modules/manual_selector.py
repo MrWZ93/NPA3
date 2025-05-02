@@ -441,48 +441,18 @@ class ManualSpikeSelector(QWidget):
             self.spike_ax.set_title("Selected Peak - Use Span to Refine Selection", 
                             fontsize=10, fontweight='bold')
             
-            # 如果有选中的峰值，则在spike_ax中显示
+            # 如果有选中的峰值数据，则调用update_peak_display
             if hasattr(self, 'current_manual_spike_data') and self.current_manual_spike_data:
-                peak_idx = self.current_manual_spike_data.get('index', 0)
-                if peak_idx is not None and peak_idx < len(time_axis) and peak_idx < len(data):
-                    # ===== 修改这部分代码以保持显示一致性 =====
-                    # 使用用户选择的完整区域而不是只显示峰值周围的一小段
-                    start_time = self.current_manual_spike_data.get('start_time')
-                    end_time = self.current_manual_spike_data.get('end_time')
-                    
-                    if start_time is not None and end_time is not None:
-                        # 使用用户选择的区域
-                        display_start_idx = np.abs(time_axis - start_time).argmin()
-                        display_end_idx = np.abs(time_axis - end_time).argmin()
-                    else:
-                        # 如果没有用户选择的区域，就用默认的峰值周围区域
-                        display_width = window_width * 0.2
-                        peak_time = self.current_manual_spike_data.get('time', time_axis[peak_idx])
-                        display_start = max(time_axis[0], peak_time - display_width/2)
-                        display_end = min(time_axis[-1], peak_time + display_width/2)
-                        display_start_idx = np.abs(time_axis - display_start).argmin()
-                        display_end_idx = np.abs(time_axis - display_end).argmin()
-                    
-                    # 绘制选中区域的数据
-                    self.spike_ax.plot(time_axis[display_start_idx:display_end_idx+1], 
-                                    data[display_start_idx:display_end_idx+1])
-                    
-                    # 标记峰值位置
-                    self.spike_ax.plot(time_axis[peak_idx], data[peak_idx], 'go', ms=8)
-                    
-                    # 显示当前选择的区域
-                    if start_time is not None and end_time is not None:
-                        self.spike_ax.axvspan(start_time, end_time, alpha=0.2, color='blue')
-                        # 设置x轴范围为用户选择的区域
-                        self.spike_ax.set_xlim(start_time, end_time)
-                    
-                    # 更新标题显示峰值信息
-                    amplitude = self.current_manual_spike_data.get('amplitude', 0)
-                    duration_ms = self.current_manual_spike_data.get('duration', 0) * 1000
-                    self.spike_ax.set_title(
-                        f"Selected Peak at {time_axis[peak_idx]:.4f}s, Amp={amplitude:.2f}nA, Dur={duration_ms:.2f}ms",
-                        fontsize=10, fontweight='bold'
-                    )
+                # 单独调用update_peak_display方法更新figure3
+                self.update_peak_display()
+            else:
+                # 如果没有选中的峰值数据，则显示提示信息
+                self.spike_ax.text(0.5, 0.5, "Select a region in the Zoomed View above",
+                        horizontalalignment='center',
+                        verticalalignment='center',
+                        transform=self.spike_ax.transAxes,
+                        fontsize=10, fontweight='bold',
+                        bbox=dict(boxstyle='round,pad=0.5', facecolor='yellow', alpha=0.3))
             
             # 调整布局
             self.manual_fig.tight_layout()
@@ -509,9 +479,26 @@ class ManualSpikeSelector(QWidget):
     
     def on_slider_changed(self, val):
         """处理滑块值变化"""
+        # 保存之前的值
+        old_val = self.slider_pos
+        
+        # 更新值
         self.slider_pos = val
         self.slider_info_label.setText(f"Slider position: {val:.1%}")
+        
+        # 保存figure3的当前状态
+        figure3_data = None
+        if hasattr(self, 'current_manual_spike_data') and self.current_manual_spike_data:
+            figure3_data = self.current_manual_spike_data.copy()
+        
+        # 更新绘图
         self.update_manual_plot(preserve_selection=True)
+        
+        # 还原figure3的状态
+        if figure3_data is not None:
+            self.current_manual_spike_data = figure3_data
+            # 重新绘制figure3
+            self.update_peak_display()
     
     def move_slider_left(self):
         """向左移动滑块"""
@@ -765,7 +752,13 @@ class ManualSpikeSelector(QWidget):
                 'start_time': xmin,
                 'end_time': xmax,
                 'duration': xmax - xmin,
-                'manual': True
+                'manual': True,
+                # 清除之前的最终选择
+                'final_start_time': None,
+                'final_end_time': None,
+                'final_start_idx': None,
+                'final_end_idx': None,
+                'final_duration': None
             }
             
             # 在zoomed_ax中高亮显示选择的区域
@@ -838,15 +831,28 @@ class ManualSpikeSelector(QWidget):
         try:
             if not hasattr(self, 'current_manual_spike_data') or not self.current_manual_spike_data:
                 return
-                
-            # 保存当前视图范围
-            if hasattr(self, 'spike_ax') and self.spike_ax is not None:
-                saved_xlim = self.spike_ax.get_xlim()
-                saved_ylim = self.spike_ax.get_ylim()
             
+            # 获取当前figure3的视图范围
+            if hasattr(self, 'spike_ax') and self.spike_ax is not None:
+                current_xlim = self.spike_ax.get_xlim()
+                current_ylim = self.spike_ax.get_ylim()
+            
+            # 确保选择是有效的
+            if xmin >= xmax:
+                print(f"Warning: Invalid span selection: xmin={xmin}, xmax={xmax}")
+                return
+                
             # 获取当前数据和时间轴
             data = self.plot_canvas.current_channel_data
             time_axis = self.plot_canvas.time_axis
+            
+            # 获取当前figure3显示的时间范围
+            start_time = self.current_manual_spike_data.get('start_time')
+            end_time = self.current_manual_spike_data.get('end_time')
+            
+            # 确保选择在显示范围内
+            xmin = max(start_time, xmin)
+            xmax = min(end_time, xmax)
             
             # 在时间轴中找到选择的起始和结束索引
             start_idx = np.abs(time_axis - xmin).argmin()
@@ -901,13 +907,16 @@ class ManualSpikeSelector(QWidget):
             self.selection_status_label.setText(
                 f"Final selection: {xmin:.4f}s - {xmax:.4f}s (Duration: {duration_ms:.2f} ms)")
             
+            # 备份当前选择的数据
+            current_data = self.current_manual_spike_data.copy()
+            
             # 更新当前峰值数据的细节
             self.current_manual_spike_data.update({
-                'start_idx': start_idx,
-                'end_idx': end_idx,
-                'start_time': xmin,
-                'end_time': xmax,
-                'duration': xmax - xmin,
+                'final_start_idx': start_idx,
+                'final_end_idx': end_idx,
+                'final_start_time': xmin,
+                'final_end_time': xmax,
+                'final_duration': xmax - xmin,
                 'index': peak_idx,
                 'time': time_axis[peak_idx],
                 'amplitude': amplitude
@@ -920,23 +929,23 @@ class ManualSpikeSelector(QWidget):
                     if hasattr(collection, '_is_final_selection'):
                         collection.remove()
                 
-                # 添加新的区域标记
-                span = self.spike_ax.axvspan(xmin, xmax, alpha=0.3, color='red')
-                span._is_final_selection = True
+                # 保存当前的状态
+                self._in_final_selection = True
                 
-                # 更新标题显示选择信息
-                self.spike_ax.set_title(
-                    f"Final Selection: {xmin:.4f}s - {xmax:.4f}s, Amp={amplitude:.2f}nA",
-                    fontsize=10, fontweight='bold'
-                )
+                # 调用update_peak_display更新显示
+                self.update_peak_display()
+                
+                # 重置状态
+                self._in_final_selection = False
                 
                 # 恢复视图范围
-                self.spike_ax.set_xlim(saved_xlim)
-                self.spike_ax.set_ylim(saved_ylim)
-                
-                # 仅重绘必要的部分
-                if hasattr(self, 'plot_canvas') and self.plot_canvas is not None:
-                    self.plot_canvas.draw_idle()
+                if hasattr(self, 'spike_ax') and self.spike_ax is not None:
+                    self.spike_ax.set_xlim(current_xlim)
+                    self.spike_ax.set_ylim(current_ylim)
+                    
+                    # 仅重绘必要的部分
+                    if hasattr(self, 'plot_canvas') and self.plot_canvas is not None:
+                        self.plot_canvas.draw_idle()
             
             # 启用添加按钮
             self.add_spike_button.setEnabled(True)
@@ -945,6 +954,7 @@ class ManualSpikeSelector(QWidget):
             import traceback
             print(f"Error in final span selection: {e}")
             print(traceback.format_exc())
+
     
     def update_peak_display(self):
         """更新第三个子图中选中峰值的显示"""
@@ -970,7 +980,16 @@ class ManualSpikeSelector(QWidget):
             
             if start_time is None or end_time is None or start_idx is None or end_idx is None:
                 return
-            
+                
+            # 确保索引在有效范围内
+            if start_idx >= len(data) or end_idx >= len(data) or start_idx < 0 or end_idx < 0:
+                print(f"Warning: Invalid index range [{start_idx}:{end_idx}] for data length {len(data)}")
+                return
+                
+            # 确保start_idx <= end_idx
+            if start_idx > end_idx:
+                start_idx, end_idx = end_idx, start_idx
+                
             # 清除现有内容
             self.spike_ax.clear()
             
@@ -979,25 +998,76 @@ class ManualSpikeSelector(QWidget):
             self.spike_ax.set_xlabel("Time (s)", fontsize=9)
             self.spike_ax.set_ylabel("Current (nA)", fontsize=9)
             
-            # 只绘制精确选择的区域数据
+            # 获取选择区域的数据
             selection_data = data[start_idx:end_idx+1]
             selection_time = time_axis[start_idx:end_idx+1]
             
+            # 检查数据是否为空
+            if len(selection_data) == 0 or len(selection_time) == 0:
+                print("Warning: No data to display in peak_display")
+                # 设置一个默认的空白视图
+                self.spike_ax.set_title("No data to display", fontsize=10, fontweight='bold')
+                return
+                
             # 绘制所选区域的数据
             self.spike_ax.plot(selection_time, selection_data)
             
-            # 标记峰值位置
-            self.spike_ax.plot(peak_time, data[peak_idx], 'go', ms=8)
+            # 显示已标记的峰值
+            for spike in self.manual_spikes:
+                if 'index' in spike and 'time' in spike:
+                    spike_time = spike.get('time')
+                    spike_index = spike.get('index')
+                    
+                    # 检查峰值是否在当前显示范围内
+                    if start_time <= spike_time <= end_time and spike_index < len(data):
+                        # 使用绿色标记已添加的峰值
+                        self.spike_ax.plot(spike_time, data[spike_index], 'go', ms=6, alpha=0.7)
+            
+            # 高亮显示用户在figure3中选择的区域（如果有）
+            final_start_time = self.current_manual_spike_data.get('final_start_time')
+            final_end_time = self.current_manual_spike_data.get('final_end_time')
+            
+            if final_start_time is not None and final_end_time is not None:
+                # 确保final_start_time和final_end_time在显示范围内
+                if (min(selection_time) <= final_start_time <= max(selection_time) or 
+                    min(selection_time) <= final_end_time <= max(selection_time) or
+                    (final_start_time <= min(selection_time) and final_end_time >= max(selection_time))):
+                    
+                    # 高亮显示用户在figure3中选择的区域
+                    highlight_start = max(min(selection_time), final_start_time)
+                    highlight_end = min(max(selection_time), final_end_time)
+                    self.spike_ax.axvspan(
+                        highlight_start,
+                        highlight_end,
+                        alpha=0.3, 
+                        color='red'
+                    )
+            
+            # 标记当前选择的峰值位置（用红色标记当前选择的峰值）
+            if peak_idx is not None and peak_idx < len(data):
+                if min(selection_time) <= peak_time <= max(selection_time):
+                    self.spike_ax.plot(peak_time, data[peak_idx], 'ro', ms=8)
             
             # 更新标题显示峰值信息
             duration_ms = (end_time - start_time) * 1000
-            self.spike_ax.set_title(
-                f"Selected Peak: {start_time:.4f}s - {end_time:.4f}s, Amp={amplitude:.2f}nA, Dur={duration_ms:.2f}ms",
-                fontsize=10, fontweight='bold'
-            )
+            # 如果有最终选择，则在标题中同时显示初始和最终选择信息
+            if final_start_time is not None and final_end_time is not None:
+                final_duration_ms = (final_end_time - final_start_time) * 1000
+                self.spike_ax.set_title(
+                    f"Selected Peak: {start_time:.4f}s - {end_time:.4f}s, Final: {final_start_time:.4f}s - {final_end_time:.4f}s, Amp={amplitude:.2f}nA",
+                    fontsize=9, fontweight='bold'
+                )
+            else:
+                self.spike_ax.set_title(
+                    f"Selected Peak: {start_time:.4f}s - {end_time:.4f}s, Amp={amplitude:.2f}nA, Dur={duration_ms:.2f}ms",
+                    fontsize=10, fontweight='bold'
+                )
             
-            # 设置精确的显示范围
+            # 设置显示范围为用户选择的区域
             self.spike_ax.set_xlim(start_time, end_time)
+            
+            # 自动调整Y轴范围以显示完整数据
+            self.spike_ax.margins(y=0.1)
             
             # 重绘
             if hasattr(self, 'plot_canvas') and self.plot_canvas is not None:
@@ -1007,6 +1077,7 @@ class ManualSpikeSelector(QWidget):
             import traceback
             print(f"Error updating peak display: {e}")
             print(traceback.format_exc())
+
     
     def add_manual_peak(self):
         """添加手动标记的峰值"""
@@ -1016,16 +1087,30 @@ class ManualSpikeSelector(QWidget):
         
         try:
             # 保存当前的视图状态
-            saved_view = None
+            current_xlim = None
+            current_ylim = None
             if hasattr(self, 'spike_ax') and self.spike_ax is not None:
-                saved_view = {
-                    'xlim': self.spike_ax.get_xlim(),
-                    'ylim': self.spike_ax.get_ylim()
-                }
+                current_xlim = self.spike_ax.get_xlim()
+                current_ylim = self.spike_ax.get_ylim()
+            
+            # 创建峰值数据的副本进行修改
+            peak_data = self.current_manual_spike_data.copy()
+            
+            # 获取最终选择的数据
+            final_start_time = peak_data.get('final_start_time')
+            final_end_time = peak_data.get('final_end_time')
+            
+            # 如果有最终选择，则使用最终选择的数据
+            if final_start_time is not None and final_end_time is not None:
+                # 使用最终选择的数据更新峰值
+                peak_data['start_time'] = final_start_time
+                peak_data['end_time'] = final_end_time
+                peak_data['duration'] = final_end_time - final_start_time
+                peak_data['start_idx'] = peak_data.get('final_start_idx')
+                peak_data['end_idx'] = peak_data.get('final_end_idx')
                 
             # 给峰值添加ID
             self.manual_spike_count += 1
-            peak_data = self.current_manual_spike_data.copy()
             peak_data['id'] = self.manual_spike_count
             
             # 添加到峰值列表
@@ -1043,11 +1128,35 @@ class ManualSpikeSelector(QWidget):
             # 标记最后添加的峰值ID，用于高亮显示
             self.last_added_peak_id = self.manual_spike_count
             
-            # 更新绘图
-            self.update_manual_plot(preserve_view=True, saved_view=saved_view)
+            # 保存当前选择，以便能够恢复figure3的显示
+            current_data = self.current_manual_spike_data.copy()
+            
+            # 设置标志以避免递归和初始化问题
+            self._adding_peak = True
+            
+            # 更新绘图，但不更新figure3
+            self.update_manual_plot(preserve_selection=True, update_spike_ax=False)
+            
+            # 恢复figure3的显示
+            self.current_manual_spike_data = current_data
+            
+            # 恢复视图状态
+            if current_xlim is not None and current_ylim is not None and hasattr(self, 'spike_ax') and self.spike_ax is not None:
+                self.spike_ax.set_xlim(current_xlim)
+                self.spike_ax.set_ylim(current_ylim)
+            
+            # 手动调用update_peak_display来更新figure3
+            # 这会保持figure3的数据显示不变
+            self.update_peak_display()
+            
+            # 重置标志
+            self._adding_peak = False
             
             # 发送峰值添加信号
             self.peak_added.emit(peak_data)
+            
+            # 显示临时消息
+            self.show_temp_message("Peak added successfully!")
             
         except Exception as e:
             import traceback
@@ -1058,7 +1167,7 @@ class ManualSpikeSelector(QWidget):
         """清除所有手动标记的峰值"""
         if not self.manual_spikes:
             return
-            
+                
         reply = QMessageBox.question(
             self, 
             "Confirm Clear", 
@@ -1078,7 +1187,7 @@ class ManualSpikeSelector(QWidget):
             
             # 更新表格
             self.update_spikes_table()
-    
+
     def export_manual_peaks(self):
         """将峰值数据导出到文件"""
         if not self.manual_spikes:

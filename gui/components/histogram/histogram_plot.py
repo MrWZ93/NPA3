@@ -238,6 +238,29 @@ class HistogramPlot(FigureCanvas):
         
         # 重绘
         self.draw()
+        
+    def toggle_fit_labels(self, visible):
+        """切换拟合标签的可见性"""
+        try:
+            if not hasattr(self, 'gaussian_fits'):
+                return False
+            
+            # 设置标签可见性状态
+            self.labels_visible = visible
+            
+            # 更新所有拟合标签的可见性
+            for fit in self.gaussian_fits:
+                if 'text' in fit:
+                    fit['text'].set_visible(visible)
+            
+            # 重绘
+            self.draw()
+            return True
+        except Exception as e:
+            print(f"Error in toggle_fit_labels: {e}")
+            import traceback
+            traceback.print_exc()
+            return False
     
     def __init_span_updater(self):
         """初始化延时更新定时器用于优化span选择器"""
@@ -392,7 +415,7 @@ class HistogramPlot(FigureCanvas):
             scaling_factor = bin_width * len(data)
             ys = ys * scaling_factor
             
-            # 绘制KDE曲线
+            # 绘制KDE曲线，不添加标签和图例
             self.kde_line, = self.ax3.plot(ys, xs, 'r-', linewidth=2)
             
         except Exception as e:
@@ -630,8 +653,8 @@ class HistogramPlot(FigureCanvas):
                 ys = ys * scaling_factor
                 
                 # 绘制KDE曲线 - 将其放在直方图之上
-                self.ax.plot(xs, ys, 'r-', linewidth=2, label='KDE', zorder=10)
-                self.ax.legend()
+                self.ax.plot(xs, ys, 'r-', linewidth=2, zorder=10)
+                # 移除legend
                 
             except Exception as e:
                 print(f"Error plotting KDE for subplot3: {e}")
@@ -641,20 +664,8 @@ class HistogramPlot(FigureCanvas):
         # 添加网格线以便于阅读
         self.ax.grid(True, linestyle='--', alpha=0.7)
         
-        # 添加统计信息文本框
-        textstr = f"\n".join((
-            f"Count: {len(data)}",
-            f"Mean: {np.mean(data):.4f}",
-            f"Std Dev: {np.std(data):.4f}",
-            f"Min: {np.min(data):.4f}",
-            f"Max: {np.max(data):.4f}",
-            f"Median: {np.median(data):.4f}"
-        ))
-        
-        # 放置在图的右上角
-        props = dict(boxstyle='round', facecolor='wheat', alpha=0.5)
-        self.ax.text(0.95, 0.95, textstr, transform=self.ax.transAxes, fontsize=9,
-                verticalalignment='top', horizontalalignment='right', bbox=props)
+        # 移除统计信息文本框
+        # (已删除文本框)
         
         # 创建矩形选择器，允许框选区域进行高斯拟合
         self.rect_selector = RectangleSelector(
@@ -673,6 +684,9 @@ class HistogramPlot(FigureCanvas):
         # 不再创建setup_info_panel，因为我们现在使用单独的FitInfoPanel
         # 只保留信息字符串用于其它功能
         self.fit_info_str = "No fits yet"
+        
+        # 标签可见性状态
+        self.labels_visible = True
         
         # 调整布局
         self.fig.tight_layout()
@@ -784,6 +798,10 @@ class HistogramPlot(FigureCanvas):
                 text_obj = self.ax.text(mu, amp*1.05, text, ha='center', va='bottom', fontsize=9,
                     bbox=dict(facecolor='white', alpha=0.8, edgecolor=fit_color, boxstyle='round'),
                     color=fit_color, zorder=20)
+                
+                # 如果当前标签不可见，隐藏文本
+                if not self.labels_visible:
+                    text_obj.set_visible(False)
                 
                 # 将拟合参数添加到列表
                 self.gaussian_fits.append({
@@ -959,6 +977,9 @@ class HistogramPlot(FigureCanvas):
                         bbox=dict(facecolor='white', alpha=0.8, edgecolor=color, boxstyle='round'),
                         color=color, zorder=20)
                     
+                    # 如果标签当前不可见，则隐藏文本
+                    text_obj.set_visible(self.labels_visible)
+                    
                     # 更新拟合对象
                     self.gaussian_fits[i] = {
                         'popt': (amp, mu, sigma),
@@ -1085,3 +1106,26 @@ class HistogramPlot(FigureCanvas):
         
         # 重绘
         self.draw()
+
+    def toggle_fit_labels(self, visible):
+        """切换拟合标签的可见性"""
+        try:
+            if not hasattr(self, 'gaussian_fits'):
+                return False
+            
+            # 设置标签可见性状态
+            self.labels_visible = visible
+            
+            # 更新所有拟合标签的可见性
+            for fit in self.gaussian_fits:
+                if 'text' in fit:
+                    fit['text'].set_visible(visible)
+            
+            # 重绘
+            self.draw()
+            return True
+        except Exception as e:
+            print(f"Error in toggle_fit_labels: {e}")
+            import traceback
+            traceback.print_exc()
+            return False

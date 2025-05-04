@@ -172,10 +172,12 @@ class HistogramDialog(QDialog):
         
         # 拟合信息面板信号
         self.fit_info_panel.fit_deleted.connect(self.on_fit_deleted)
+        self.fit_info_panel.fits_deleted.connect(self.on_fits_deleted)
         self.fit_info_panel.fit_edited.connect(self.on_fit_edited)
         self.fit_info_panel.fit_selected.connect(self.on_fit_selected)
         self.fit_info_panel.export_all_fits.connect(self.on_export_histogram)
         self.fit_info_panel.copy_all_fits.connect(self.on_copy_fit_info)
+        self.fit_info_panel.toggle_fit_labels.connect(self.on_toggle_fit_labels)
     
     def load_file(self):
         """加载文件"""
@@ -525,6 +527,9 @@ class HistogramDialog(QDialog):
         """处理删除拟合项目请求"""
         try:
             if hasattr(self.subplot3_canvas, 'delete_specific_fit'):
+                # 先从拟合信息面板删除
+                self.fit_info_panel.remove_fit(fit_index)
+                # 再从图中删除
                 self.subplot3_canvas.delete_specific_fit(fit_index)
                 self.status_bar.showMessage(f"Deleted fit {fit_index}")
         except Exception as e:
@@ -547,3 +552,28 @@ class HistogramDialog(QDialog):
                 self.status_bar.showMessage(f"Selected fit {fit_index}")
         except Exception as e:
             self.status_bar.showMessage(f"Error selecting fit: {str(e)}")
+    
+    def on_fits_deleted(self, fit_indices):
+        """处理删除多个拟合项请求"""
+        try:
+            if hasattr(self.subplot3_canvas, 'delete_specific_fit'):
+                # 从大到小排序索引，以避免删除早期项时影响后续项的索引
+                for fit_index in sorted(fit_indices, reverse=True):
+                    # 先从技师信息面板删除
+                    self.fit_info_panel.remove_fit(fit_index)
+                    # 再从图中删除
+                    self.subplot3_canvas.delete_specific_fit(fit_index)
+                
+                self.status_bar.showMessage(f"Deleted {len(fit_indices)} fits")
+        except Exception as e:
+            self.status_bar.showMessage(f"Error deleting fits: {str(e)}")
+    
+    def on_toggle_fit_labels(self, visible):
+        """处理切换拟合标签可见性请求"""
+        try:
+            if hasattr(self.subplot3_canvas, 'toggle_fit_labels'):
+                self.subplot3_canvas.toggle_fit_labels(visible)
+                status = "visible" if visible else "hidden"
+                self.status_bar.showMessage(f"Fit labels are now {status}")
+        except Exception as e:
+            self.status_bar.showMessage(f"Error toggling fit labels: {str(e)}")

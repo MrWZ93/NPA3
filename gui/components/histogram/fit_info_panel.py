@@ -10,8 +10,8 @@ from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel,
                             QAbstractItemView, QMenu, QDialog, QFormLayout,
                             QDoubleSpinBox, QTabWidget, QGroupBox, QSplitter,
                             QFrame, QToolButton, QLineEdit, QMessageBox)
-from PyQt6.QtCore import Qt, pyqtSignal, QSize, QPoint
-from PyQt6.QtGui import QColor, QBrush, QFont, QAction
+from PyQt6.QtCore import Qt, pyqtSignal, QSize, QPoint, QItemSelectionModel
+from PyQt6.QtGui import QColor, QBrush, QFont, QAction, QIcon
 
 
 class FitListItem(QListWidgetItem):
@@ -149,9 +149,11 @@ class FitInfoPanel(QWidget):
     # 定义信号
     fit_selected = pyqtSignal(int)  # 选中拟合项时发送索引
     fit_deleted = pyqtSignal(int)   # 删除拟合项时发送索引
+    fits_deleted = pyqtSignal(list)  # 删除多个拟合项时发送索引列表
     fit_edited = pyqtSignal(int, dict)  # 编辑拟合项时发送索引和新参数
     export_all_fits = pyqtSignal()  # 导出所有拟合数据
     copy_all_fits = pyqtSignal()    # 复制所有拟合数据
+    toggle_fit_labels = pyqtSignal(bool)  # 切换拟合标签的可见性
     
     def __init__(self, parent=None):
         super(FitInfoPanel, self).__init__(parent)
@@ -195,10 +197,29 @@ class FitInfoPanel(QWidget):
         # 拟合列表
         self.fit_list = QListWidget()
         self.fit_list.setAlternatingRowColors(True)
-        self.fit_list.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
+        self.fit_list.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
         self.fit_list.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         
         layout.addWidget(self.fit_list)
+        
+        # 添加按钮区域
+        button_layout = QHBoxLayout()
+        
+        # 删除选中项按钮
+        self.delete_selected_btn = QPushButton("Delete Selected")
+        self.delete_selected_btn.setToolTip("Delete selected fit(s)")
+        self.delete_selected_btn.setEnabled(False)  # 初始禁用
+        
+        # 切换拟合标签可见性按钮
+        self.toggle_labels_btn = QPushButton("Hide Labels")
+        self.toggle_labels_btn.setToolTip("Hide/Show fit labels in the plot")
+        self.toggle_labels_btn.setCheckable(True)
+        
+        # 添加按钮到布局
+        button_layout.addWidget(self.delete_selected_btn)
+        button_layout.addWidget(self.toggle_labels_btn)
+        
+        layout.addLayout(button_layout)
         
         # 统计信息区域
         self.stats_group = QGroupBox("Statistics")
@@ -222,6 +243,8 @@ class FitInfoPanel(QWidget):
         self.fit_list.customContextMenuRequested.connect(self.show_context_menu)
         self.export_btn.clicked.connect(self.export_all_fits.emit)
         self.copy_btn.clicked.connect(self.copy_all_fits.emit)
+        self.delete_selected_btn.clicked.connect(self.delete_selected_fits)
+        self.toggle_labels_btn.clicked.connect(self.on_toggle_labels)
         
         # 打印调试信息
         print("FitInfoPanel initialized")
@@ -318,7 +341,12 @@ class FitInfoPanel(QWidget):
     def on_selection_changed(self):
         """处理选择变化"""
         selected_items = self.fit_list.selectedItems()
-        if selected_items:
+        
+        # 根据选择状态启用/禁用删除按钮
+        self.delete_selected_btn.setEnabled(len(selected_items) > 0)
+        
+        if len(selected_items) == 1:
+            # 单选情况：更新统计信息并发送选中信号
             item = selected_items[0]
             data = item.data(Qt.ItemDataRole.UserRole)
             
@@ -327,6 +355,12 @@ class FitInfoPanel(QWidget):
             
             # 发送选中信号
             self.fit_selected.emit(data['fit_index'])
+        elif len(selected_items) > 1:
+            # 多选情况：显示多选状态的统计信息
+            self.stats_label.setText(f"<b>{len(selected_items)} fits selected</b><br>Select a single fit to view details")
+        else:
+            # 未选择任何项时
+            self.stats_label.setText("Select a fit to view its details")
     
     def update_stats_info(self, data):
         """更新统计信息区域"""
@@ -382,8 +416,35 @@ class FitInfoPanel(QWidget):
             self.fit_edited.emit(data['fit_index'], edited_data)
     
     def delete_fit(self, item):
-        """删除拟合项目"""
+        """删除单个拟合项目"""
         data = item.data(Qt.ItemDataRole.UserRole)
         
         # 发送删除信号
         self.fit_deleted.emit(data['fit_index'])
+        
+    def delete_selected_fits(self):
+        """删除所有选中的拟合项目"""
+        selected_items = self.fit_list.selectedItems()
+        if not selected_items:
+            return
+            
+        # 收集所有选中项的索引
+        fit_indices = []
+        for item in selected_items:
+            data = item.data(Qt.ItemDataRole.UserRole)
+            fit_indices.append(data['fit_index'])
+        
+        # 如果只选择了一个项目，使用单项删除信号
+        if len(fit_indices) == 1:
+            self.fit_deleted.emit(fit_indices[0])
+        else:
+            # 发送多项删除信号
+            self.fits_deleted.emit(fit_indices)
+            
+    def on_toggle_labels(self, checked):
+        """切换拟合标签的可见性"""
+        # 更新按钮文本
+        self.toggle_labels_btn.setText("Show Labels" if checked else "Hide Labels")
+        
+        # 发送信号通知控制器
+        self.toggle_fit_labels.emit(not checked)  # 传递相反的值，因为checked=True表示按钮被按下，即隐藏标签

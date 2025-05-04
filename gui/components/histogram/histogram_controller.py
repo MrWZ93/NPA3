@@ -46,6 +46,14 @@ class HistogramController:
         self.view.histogram_control.invert_data_changed.connect(self.on_invert_data_changed)
         self.view.histogram_control.clear_fits_requested.connect(self.on_clear_fits_requested)
         
+        # 连接拟合信息面板的信号
+        if hasattr(self.view, 'fit_info_panel'):
+            self.view.fit_info_panel.fit_selected.connect(self.on_fit_selected)
+            self.view.fit_info_panel.fit_deleted.connect(self.on_fit_deleted)
+            self.view.fit_info_panel.fits_deleted.connect(self.on_fits_deleted)
+            self.view.fit_info_panel.fit_edited.connect(self.on_fit_edited)
+            self.view.fit_info_panel.toggle_fit_labels.connect(self.on_toggle_fit_labels)
+        
         # 暗色模式和导出功能
         if hasattr(self.view.histogram_control, 'dark_mode_changed'):
             self.view.histogram_control.dark_mode_changed.connect(self.on_dark_mode_changed)
@@ -360,3 +368,38 @@ class HistogramController:
         if hasattr(self.view, 'subplot3_canvas') and hasattr(self.view.subplot3_canvas, 'clear_fits'):
             self.view.subplot3_canvas.clear_fits()
             self.view.status_bar.showMessage("Cleared all Gaussian fits")
+            
+    def on_fit_selected(self, fit_index):
+        """处理拟合项被选中"""
+        if hasattr(self.view, 'subplot3_canvas') and hasattr(self.view.subplot3_canvas, 'highlight_specific_fit'):
+            self.view.subplot3_canvas.highlight_specific_fit(fit_index)
+            
+    def on_fit_deleted(self, fit_index):
+        """处理单个拟合项被删除"""
+        if hasattr(self.view, 'subplot3_canvas') and hasattr(self.view.subplot3_canvas, 'delete_specific_fit'):
+            success = self.view.subplot3_canvas.delete_specific_fit(fit_index)
+            if success:
+                self.view.status_bar.showMessage(f"Deleted fit {fit_index}")
+            
+    def on_fits_deleted(self, fit_indices):
+        """处理多个拟合项被删除"""
+        if hasattr(self.view, 'subplot3_canvas') and hasattr(self.view.subplot3_canvas, 'delete_specific_fit'):
+            # 从大到小排序索引，以避免删除早期项时影响后续项的索引
+            for fit_index in sorted(fit_indices, reverse=True):
+                self.view.subplot3_canvas.delete_specific_fit(fit_index)
+            
+            self.view.status_bar.showMessage(f"Deleted {len(fit_indices)} fits")
+            
+    def on_fit_edited(self, fit_index, new_params):
+        """处理拟合项被编辑"""
+        if hasattr(self.view, 'subplot3_canvas') and hasattr(self.view.subplot3_canvas, 'update_specific_fit'):
+            success = self.view.subplot3_canvas.update_specific_fit(fit_index, new_params)
+            if success:
+                self.view.status_bar.showMessage(f"Updated fit {fit_index}")
+                
+    def on_toggle_fit_labels(self, visible):
+        """切换拟合标签的可见性"""
+        if hasattr(self.view, 'subplot3_canvas') and hasattr(self.view.subplot3_canvas, 'toggle_fit_labels'):
+            self.view.subplot3_canvas.toggle_fit_labels(visible)
+            status = "visible" if visible else "hidden"
+            self.view.status_bar.showMessage(f"Fit labels are now {status}")

@@ -34,26 +34,48 @@ class PSDWorker(QThread):
         
     def run(self):
         try:
-            # 对于超大数据集，考虑分块处理
+            # 对于超大数据集，使用优化的分块处理
             if len(self.data) > 10_000_000:  # 1千万个样本点以上
-                chunk_size = 5_000_000
-                chunks = len(self.data) // chunk_size + (1 if len(self.data) % chunk_size else 0)
+                # 增加块大小以确保低频分析的准确性
+                chunk_size = 10_000_000  # 增加块大小到1千万点
+                
+                # 使用重叠分块而不是简单分割
+                overlap_ratio = 0.5  # 块间重叠50%
+                effective_chunk_size = int(chunk_size * (1 - overlap_ratio))
+                
+                # 计算需要的块数
+                total_length = len(self.data)
+                chunks = (total_length - chunk_size) // effective_chunk_size + 2
+                
+                # 确保noverlap < nperseg
+                noverlap = self.noverlap
+                if noverlap >= self.nperseg:
+                    noverlap = self.nperseg - 1
+                
+                # 为多分辨率分析准备两个频率范围
+                low_freq_data = None
                 frequencies = None
                 psd_sum = None
+                weight_sum = None
                 
+                # 使用Welch的方法的内置分段特性，为每个块赋予权重
                 for i in range(chunks):
-                    start_idx = i * chunk_size
-                    end_idx = min(start_idx + chunk_size, len(self.data))
+                    # 计算块的起始和结束位置，确保重叠
+                    start_idx = i * effective_chunk_size
+                    end_idx = min(start_idx + chunk_size, total_length)
+                    if end_idx - start_idx < self.nperseg * 2:  # 确保块至少包含两个段
+                        continue
+                        
                     chunk_data = self.data[start_idx:end_idx]
                     
-                    # 确保 noverlap < nperseg
-                    noverlap = self.noverlap
-                    if noverlap >= self.nperseg:
-                        noverlap = self.nperseg - 1
+                    # 使用汉宁窗函数对块数据进行加权
+                    # 这减少了块边界的不连续性影响
+                    chunk_weight = np.hanning(len(chunk_data))
+                    weighted_chunk = chunk_data * chunk_weight
                     
                     # 计算该块的PSD
                     f, p = signal.welch(
-                        chunk_data, 
+                        weighted_chunk, 
                         fs=self.fs,
                         window=self.window,
                         nperseg=self.nperseg,
@@ -64,18 +86,33 @@ class PSDWorker(QThread):
                         return_onesided=True
                     )
                     
-                    # 汇总结果
+                    # 计算权重因子 - 边缘块的权重较低
+                    chunk_importance = 1.0
+                    if i == 0 or i == chunks - 1:  # 第一个和最后一个块权重较低
+                        chunk_importance = 0.7
+                    
+                    # 汇总结果 - 权重平均而不是简单平均
                     if frequencies is None:
                         frequencies = f
-                        psd_sum = p
+                        psd_sum = p * chunk_importance
+                        weight_sum = np.ones_like(p) * chunk_importance
                     else:
-                        psd_sum += p
+                        psd_sum += p * chunk_importance
+                        weight_sum += chunk_importance
+                    
+                    # 单独保存第一个块用于低频分析
+                    if i == 0 and low_freq_data is None:
+                        low_freq_data = chunk_data
                     
                     # 更新进度
                     self.progress.emit(int(100 * (i + 1) / chunks))
                 
-                # 平均多个块的PSD结果
-                psd = psd_sum / chunks
+                # 使用权重平均计算最终PSD
+                psd = psd_sum / weight_sum
+                
+                # 【可选】特别处理低频部分
+                # 如果需要特别关注低频，可以单独对第一个块计算低频PSD并替换
+                # 这里简化实现，实际可根据需要使用更复杂的频率合并逻辑
             else:
                 # 确保noverlap < nperseg
                 noverlap = self.noverlap

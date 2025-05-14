@@ -949,6 +949,13 @@ class PSDAnalyzerDialog(QDialog):
         else:
             noverlap = int(nperseg * 0.5)
             
+        # 确保noverlap小于nperseg
+        if noverlap >= nperseg:
+            noverlap = nperseg - 1
+            QMessageBox.warning(self, "Warning", 
+                             f"Overlap ({noverlap_text}) was too large for segment length ({nperseg}).\n"
+                             f"Adjusted to {noverlap} points.")
+            
         # 获取去趋势设置
         detrend = self.psd_detrend_combo.currentText().lower()
         if detrend == "none":

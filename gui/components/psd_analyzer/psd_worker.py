@@ -46,13 +46,18 @@ class PSDWorker(QThread):
                     end_idx = min(start_idx + chunk_size, len(self.data))
                     chunk_data = self.data[start_idx:end_idx]
                     
+                    # 确保 noverlap < nperseg
+                    noverlap = self.noverlap
+                    if noverlap >= self.nperseg:
+                        noverlap = self.nperseg - 1
+                    
                     # 计算该块的PSD
                     f, p = signal.welch(
                         chunk_data, 
                         fs=self.fs,
                         window=self.window,
                         nperseg=self.nperseg,
-                        noverlap=self.noverlap,
+                        noverlap=noverlap,
                         nfft=self.nfft,
                         detrend=self.detrend,
                         scaling=self.scaling,
@@ -72,13 +77,18 @@ class PSDWorker(QThread):
                 # 平均多个块的PSD结果
                 psd = psd_sum / chunks
             else:
+                # 确保noverlap < nperseg
+                noverlap = self.noverlap
+                if noverlap >= self.nperseg:
+                    noverlap = self.nperseg - 1
+                    
                 # 正常计算单个PSD
                 frequencies, psd = signal.welch(
                     self.data, 
                     fs=self.fs,
                     window=self.window,
                     nperseg=self.nperseg,
-                    noverlap=self.noverlap,
+                    noverlap=noverlap,
                     nfft=self.nfft,
                     detrend=self.detrend,
                     scaling=self.scaling,

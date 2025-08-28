@@ -110,6 +110,17 @@ class HistogramPlot(FigureCanvas):
         
     def plot_data(self, data, sampling_rate=1000.0, bins=50, log_x=False, log_y=False, show_kde=False, invert_data=False, file_name=""):
         """绘制数据并设置初始高亮区域"""
+        # 检查数据有效性
+        if data is None or len(data) == 0:
+            print("Warning: Empty or invalid data provided to plot_data")
+            return
+        
+        # 添加数据清理步骤
+        data = self._clean_data(data)
+        if data is None or len(data) == 0:
+            print("Warning: Data became empty after cleaning")
+            return
+        
         # 保存数据和参数
         self.data = data
         self.sampling_rate = sampling_rate
@@ -150,14 +161,23 @@ class HistogramPlot(FigureCanvas):
         # 应用数据取反（如果开启）
         plot_data = -data if self.invert_data else data
         
+        # 清理处理后的数据
+        plot_data = self._clean_data(plot_data)
+        if plot_data is None or len(plot_data) == 0:
+            print("Warning: Plot data became invalid after processing")
+            return
+        
         # 绘制全数据图
         self.ax1.plot(time_axis, plot_data)
         
         # 设置初始高亮区域（默认为前10%的数据）
         self.highlight_min = 0
-        self.highlight_max = len(data) // 10
-        if self.highlight_max <= 0:
-            self.highlight_max = len(data)
+        self.highlight_max = max(1, len(data) // 10)  # 至少为1
+        if self.highlight_max <= self.highlight_min or self.highlight_max > len(data):
+            self.highlight_max = min(max(1, len(data) // 10), len(data))
+        
+        # 验证初始索引
+        self._validate_highlight_indices()
         
         # 绘制高亮区域
         self.highlight_region = self.ax1.axvspan(
@@ -168,6 +188,7 @@ class HistogramPlot(FigureCanvas):
         
         # 获取高亮区域数据（应用数据取反）
         highlighted_data = -data[self.highlight_min:self.highlight_max] if self.invert_data else data[self.highlight_min:self.highlight_max]
+        highlighted_data = self._clean_data(highlighted_data)
         highlighted_time = time_axis[self.highlight_min:self.highlight_max]
         
         # 绘制高亮区域数据
@@ -181,14 +202,8 @@ class HistogramPlot(FigureCanvas):
             alpha=0.7
         )
         
-        # 计算数据的实际范围，减少空白
-        if len(plot_data) > 0:
-            # 非常激进地减少空白 - 缩小边距共0.005
-            data_range = np.max(plot_data) - np.min(plot_data)
-            y_min = np.min(plot_data) - 0.005 * data_range
-            y_max = np.max(plot_data) + 0.005 * data_range
-        else:
-            y_min, y_max = -1, 1
+        # 安全计算数据的实际范围，减少空白
+        y_min, y_max = self._calculate_safe_ylim(plot_data)
             
         # 设置适当的轴范围 - 减少数据图左右两边的空白
         self.ax1.set_xlim(time_axis[0], time_axis[-1])
@@ -208,12 +223,9 @@ class HistogramPlot(FigureCanvas):
         
         # 得到高亮区域数据的实际范围，减少空白
         if len(highlighted_data) > 0:
-            data_range = np.max(highlighted_data) - np.min(highlighted_data)
-            # 非常激进地减少空白
-            y_min = np.min(highlighted_data) - 0.005 * data_range
-            y_max = np.max(highlighted_data) + 0.005 * data_range
-            self.ax2.set_ylim(y_min, y_max)
-            self.ax3.set_ylim(y_min, y_max)
+            h_y_min, h_y_max = self._calculate_safe_ylim(highlighted_data)
+            self.ax2.set_ylim(h_y_min, h_y_max)
+            self.ax3.set_ylim(h_y_min, h_y_max)
             
             # 添加KDE曲线
             if self.show_kde and len(highlighted_data) > 1:
@@ -238,6 +250,105 @@ class HistogramPlot(FigureCanvas):
         
         # 重绘
         self.draw()
+    
+    def _clean_data(self, data):
+        """清理数据，移除NaN和Inf值"""
+        if data is None:
+            return None
+            
+        try:
+            # 转换为numpy数组
+            data = np.asarray(data, dtype=np.float64)
+            
+            # 检查是否包含无效值
+            invalid_mask = np.isnan(data) | np.isinf(data)
+            
+            if np.any(invalid_mask):
+                print(f"Warning: Found {np.sum(invalid_mask)} invalid values (NaN/Inf) in data")
+                
+                # 如果所有数据都是无效的
+                if np.all(invalid_mask):
+                    print("Error: All data values are invalid (NaN/Inf)")
+                    return None
+                
+                # 移除无效值的策略：用插值替换
+                if np.sum(~invalid_mask) >= 2:  # 至少需要两个有效值进行插值
+                    # 使用线性插值填充无效值
+                    valid_indices = np.where(~invalid_mask)[0]
+                    invalid_indices = np.where(invalid_mask)[0]
+                    
+                    # 对于开头和结尾的无效值，用最近的有效值填充
+                    data[invalid_indices] = np.interp(
+                        invalid_indices, 
+                        valid_indices, 
+                        data[valid_indices]
+                    )
+                    print(f"Interpolated {len(invalid_indices)} invalid values")
+                else:
+                    # 如果有效值太少，无法插值，则移除无效值
+                    data = data[~invalid_mask]
+                    print(f"Removed {np.sum(invalid_mask)} invalid values")
+            
+            # 最终检查数据是否仍然有效
+            if len(data) == 0:
+                print("Error: No valid data remaining after cleaning")
+                return None
+                
+            return data
+            
+        except Exception as e:
+            print(f"Error cleaning data: {e}")
+            import traceback
+            traceback.print_exc()
+            return None
+    
+    def _calculate_safe_ylim(self, data):
+        """安全计算Y轴限制，避免NaN和Inf"""
+        try:
+            if data is None or len(data) == 0:
+                return -1, 1
+            
+            # 确保数据已清理
+            data = self._clean_data(data)
+            if data is None or len(data) == 0:
+                return -1, 1
+            
+            # 计算数据范围
+            data_min = np.min(data)
+            data_max = np.max(data)
+            
+            # 检查计算结果是否有效
+            if not (np.isfinite(data_min) and np.isfinite(data_max)):
+                print(f"Warning: Invalid data range: min={data_min}, max={data_max}")
+                return -1, 1
+            
+            # 如果最小值和最大值相等（常数数据）
+            if data_min == data_max:
+                center_val = data_min if np.isfinite(data_min) else 0
+                return center_val - 0.1, center_val + 0.1
+            
+            # 计算数据范围和边距
+            data_range = data_max - data_min
+            if not np.isfinite(data_range) or data_range == 0:
+                return data_min - 0.1, data_max + 0.1
+            
+            # 应用5‰的边距
+            margin = 0.005 * data_range
+            y_min = data_min - margin
+            y_max = data_max + margin
+            
+            # 最终安全检查
+            if not (np.isfinite(y_min) and np.isfinite(y_max)):
+                print(f"Warning: Calculated invalid y limits: y_min={y_min}, y_max={y_max}")
+                return -1, 1
+            
+            return y_min, y_max
+            
+        except Exception as e:
+            print(f"Error calculating safe y limits: {e}")
+            import traceback
+            traceback.print_exc()
+            return -1, 1
         
     def toggle_fit_labels(self, visible):
         """切换拟合标签的可见性"""
@@ -261,6 +372,27 @@ class HistogramPlot(FigureCanvas):
             import traceback
             traceback.print_exc()
             return False
+    
+    def _validate_highlight_indices(self):
+        """验证和修正高亮区域索引"""
+        if self.data is None or len(self.data) == 0:
+            self.highlight_min = 0
+            self.highlight_max = 0
+            return
+        
+        data_len = len(self.data)
+        
+        # 确保索引在有效范围内
+        self.highlight_min = max(0, min(self.highlight_min, data_len - 1))
+        self.highlight_max = max(0, min(self.highlight_max, data_len))
+        
+        # 确保 highlight_min < highlight_max
+        if self.highlight_min >= self.highlight_max:
+            # 如果索引无效，设置为默认区域（前10%或至少前100个样本）
+            default_size = min(max(1, data_len // 10), 100)
+            self.highlight_min = 0
+            self.highlight_max = min(default_size, data_len)
+            print(f"Warning: Invalid highlight indices corrected to {self.highlight_min}-{self.highlight_max}")
     
     def __init_span_updater(self):
         """初始化延时更新定时器用于优化span选择器"""
@@ -301,6 +433,14 @@ class HistogramPlot(FigureCanvas):
     
     def _update_span(self, min_idx, max_idx):
         """实际更新span选择器的改变"""
+        if self.data is None or len(self.data) == 0:
+            return
+        
+        # 验证和修正索引
+        data_len = len(self.data)
+        min_idx = max(0, min(min_idx, data_len - 1))
+        max_idx = max(min_idx + 1, min(max_idx, data_len))
+        
         # 更新高亮区域
         self.highlight_min = min_idx
         self.highlight_max = max_idx
@@ -327,6 +467,9 @@ class HistogramPlot(FigureCanvas):
         if self.data is None:
             return
             
+        # 验证和修正高亮区域索引
+        self._validate_highlight_indices()
+        
         # 清除子图2和子图3
         self.ax2.clear()
         self.ax3.clear()
@@ -345,8 +488,21 @@ class HistogramPlot(FigureCanvas):
         
         # 获取高亮区域数据（应用数据取反）
         highlighted_data = -self.data[self.highlight_min:self.highlight_max] if self.invert_data else self.data[self.highlight_min:self.highlight_max]
+        # 清理高亮数据
+        highlighted_data = self._clean_data(highlighted_data)
+        
         time_axis = np.arange(len(self.data)) / self.sampling_rate
         highlighted_time = time_axis[self.highlight_min:self.highlight_max]
+        
+        # 检查是否有有效的高亮数据
+        if highlighted_data is None or len(highlighted_data) == 0 or len(highlighted_time) == 0:
+            print("Warning: Empty highlighted region detected, skipping plot update")
+            # 设置默认的轴范围避免错误
+            self.ax2.set_xlim(0, 1)
+            self.ax2.set_ylim(-1, 1)
+            self.ax3.set_xlim(0, 1)
+            self.ax3.set_ylim(-1, 1)
+            return
         
         # 绘制高亮区域数据
         self.ax2.plot(highlighted_time, highlighted_data)
@@ -370,17 +526,15 @@ class HistogramPlot(FigureCanvas):
             alpha=0.7
         )
         
-        # 设置适当的轴范围
-        self.ax2.set_xlim(highlighted_time[0], highlighted_time[-1])
+        # 安全地设置轴范围
+        if len(highlighted_time) > 0:
+            self.ax2.set_xlim(highlighted_time[0], highlighted_time[-1])
         
-        # 得到高亮区域数据的实际范围，减少空白
+        # 安全计算高亮区域数据的实际范围
         if len(highlighted_data) > 0:
-            data_range = np.max(highlighted_data) - np.min(highlighted_data)
-            # 非常激进地减少空白
-            y_min = np.min(highlighted_data) - 0.005 * data_range
-            y_max = np.max(highlighted_data) + 0.005 * data_range
-            self.ax2.set_ylim(y_min, y_max)
-            self.ax3.set_ylim(y_min, y_max)
+            h_y_min, h_y_max = self._calculate_safe_ylim(highlighted_data)
+            self.ax2.set_ylim(h_y_min, h_y_max)
+            self.ax3.set_ylim(h_y_min, h_y_max)
             
             # 绘制KDE曲线
             if self.show_kde and len(highlighted_data) > 1:
@@ -508,8 +662,11 @@ class HistogramPlot(FigureCanvas):
     
     def update_highlight_size(self, size_percent):
         """更新高亮区域大小"""
-        if self.data is None:
+        if self.data is None or len(self.data) == 0:
             return
+        
+        # 验证当前索引
+        self._validate_highlight_indices()
         
         # 计算新的高亮区域大小
         center_idx = (self.highlight_min + self.highlight_max) // 2
@@ -553,6 +710,12 @@ class HistogramPlot(FigureCanvas):
     def plot_subplot3_histogram(self, data, bins=50, log_x=False, log_y=False, show_kde=False, file_name=""):
         """创建一个单独的subplot3直方图视图"""
         if data is None or len(data) == 0:
+            return
+        
+        # 清理数据
+        data = self._clean_data(data)
+        if data is None or len(data) == 0:
+            print("Warning: Data became empty after cleaning in subplot3")
             return
             
         # 清除当前figure
@@ -1050,8 +1213,11 @@ class HistogramPlot(FigureCanvas):
         
     def move_highlight(self, position_percent):
         """移动高亮区域位置"""
-        if self.data is None:
+        if self.data is None or len(self.data) == 0:
             return
+        
+        # 验证当前索引
+        self._validate_highlight_indices()
         
         # 计算高亮区域大小
         highlight_size = self.highlight_max - self.highlight_min

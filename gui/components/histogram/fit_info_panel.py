@@ -26,8 +26,8 @@ class FitListItem(QListWidgetItem):
         self.x_range = x_range
         self.color = color
         
-        # 显示文本
-        display_text = f"Fit {fit_index}: μ={mu:.4f}, FWHM={fwhm:.4f}"
+        # 显示文本（添加sigma信息）
+        display_text = f"Fit {fit_index}: μ={mu:.4f}, σ={sigma:.4f}, FWHM={fwhm:.4f}"
         
         # 初始化父类
         super(FitListItem, self).__init__(display_text, parent)
@@ -170,18 +170,13 @@ class FitInfoPanel(QWidget):
         title_label = QLabel("Fit Results")
         title_label.setStyleSheet("font-weight: bold; font-size: 12px;")
         
-        # 添加工具按钮
-        self.export_btn = QToolButton()
-        self.export_btn.setText("Export")
-        self.export_btn.setToolTip("Export all fit data to CSV")
-        
+        # 仅保留Copy按钮
         self.copy_btn = QToolButton()
         self.copy_btn.setText("Copy")
         self.copy_btn.setToolTip("Copy all fit data to clipboard")
         
         title_layout.addWidget(title_label)
         title_layout.addStretch(1)
-        title_layout.addWidget(self.export_btn)
         title_layout.addWidget(self.copy_btn)
         
         layout.addLayout(title_layout)
@@ -241,7 +236,6 @@ class FitInfoPanel(QWidget):
         # 连接信号
         self.fit_list.itemSelectionChanged.connect(self.on_selection_changed)
         self.fit_list.customContextMenuRequested.connect(self.show_context_menu)
-        self.export_btn.clicked.connect(self.export_all_fits.emit)
         self.copy_btn.clicked.connect(self.copy_all_fits.emit)
         self.delete_selected_btn.clicked.connect(self.delete_selected_fits)
         self.toggle_labels_btn.clicked.connect(self.on_toggle_labels)
@@ -265,9 +259,9 @@ class FitInfoPanel(QWidget):
             self.info_label.hide()
             self.fit_list.show()
             self.stats_group.show()
-            
-            # 自动选择第一个项目
-            self.fit_list.setCurrentRow(0)
+            # 不自动选择任何项目，允许所有曲线都不被选中
+            # 更新统计信息显示为未选择状态
+            self.stats_label.setText("No fits selected. All curves have the same thickness.")
         
         # 打印调试信息
         print(f"Added fit to panel: {fit_index}, {amp:.2f}, {mu:.4f}, {sigma:.4f}, FWHM={fwhm:.4f}")
@@ -294,8 +288,8 @@ class FitInfoPanel(QWidget):
                     'color': color
                 })
                 
-                # 更新显示文本
-                item.setText(f"Fit {fit_index}: μ={mu:.4f}, FWHM={fwhm:.4f}")
+                # 更新显示文本（添加sigma信息）
+                item.setText(f"Fit {fit_index}: μ={mu:.4f}, σ={sigma:.4f}, FWHM={fwhm:.4f}")
                 
                 # 更新提示文本
                 tooltip = (f"Amplitude: {amp:.2f}\n"
@@ -318,10 +312,13 @@ class FitInfoPanel(QWidget):
         """从列表中移除拟合项目"""
         for i in range(self.fit_list.count()):
             item = self.fit_list.item(i)
+            if item is None:
+                continue
+                
             data = item.data(Qt.ItemDataRole.UserRole)
-            if data['fit_index'] == fit_index:
+            if data and data['fit_index'] == fit_index:
                 # 从列表中移除项目
-                self.fit_list.takeItem(i)
+                taken_item = self.fit_list.takeItem(i)
                 
                 # 如果列表为空，显示提示信息并隐藏列表和统计区域
                 if self.fit_list.count() == 0:
@@ -329,7 +326,11 @@ class FitInfoPanel(QWidget):
                     self.fit_list.hide()
                     self.stats_group.hide()
                 
-                break
+                print(f"Removed fit {fit_index} from panel")
+                return True
+        
+        print(f"Could not find fit {fit_index} to remove from panel")
+        return False
     
     def clear_all_fits(self):
         """清除所有拟合项目"""
@@ -337,6 +338,8 @@ class FitInfoPanel(QWidget):
         self.info_label.show()
         self.fit_list.hide()
         self.stats_group.hide()
+        # 确保在清除所有拟合后，取消任何高亮状态
+        self.fit_selected.emit(-1)
     
     def on_selection_changed(self):
         """处理选择变化"""
@@ -358,9 +361,13 @@ class FitInfoPanel(QWidget):
         elif len(selected_items) > 1:
             # 多选情况：显示多选状态的统计信息
             self.stats_label.setText(f"<b>{len(selected_items)} fits selected</b><br>Select a single fit to view details")
+            # 取消所有高亮，允许所有曲线都不被选中
+            self.fit_selected.emit(-1)
         else:
-            # 未选择任何项时
-            self.stats_label.setText("Select a fit to view its details")
+            # 未选择任何项时，允许所有曲线都不被选中
+            self.stats_label.setText("No fits selected. All curves have the same thickness.")
+            # 取消所有高亮，所有曲线保持相同粗细
+            self.fit_selected.emit(-1)
     
     def update_stats_info(self, data):
         """更新统计信息区域"""

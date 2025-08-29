@@ -752,7 +752,7 @@ class HistogramPlot(FigureCanvas):
         else:
             self.gaussian_fits.clear()
             
-        # 当前高亮的拟合索引
+        # 当前高亮的拟合索引（初始化为-1，表示没有高亮）
         self.highlighted_fit_index = -1
         
         # 设置标题
@@ -948,7 +948,7 @@ class HistogramPlot(FigureCanvas):
                 
                 # 将拟合曲线绘到图上，使用颜色循环
                 y_fit = gaussian(x_fit, *popt)
-                line, = self.ax.plot(x_fit, y_fit, '-', linewidth=2.5, color=fit_color, zorder=15)
+                line, = self.ax.plot(x_fit, y_fit, '-', linewidth=1.5, color=fit_color, zorder=15)
                 
                 # 创建文本标签显示拟合参数
                 amp, mu, sigma = popt
@@ -967,18 +967,20 @@ class HistogramPlot(FigureCanvas):
                     text_obj.set_visible(False)
                 
                 # 将拟合参数添加到列表
-                self.gaussian_fits.append({
+                fit_data = {
                     'popt': popt,
                     'x_range': (x_min, x_max),
                     'line': line,
                     'text': text_obj,
                     'color': fit_color
-                })
+                }
+                self.gaussian_fits.append(fit_data)
                 
                 # 添加到拟合信息面板（如果存在）
                 if hasattr(self, 'parent_dialog') and self.parent_dialog and hasattr(self.parent_dialog, 'fit_info_panel'):
-                    print(f"Adding fit to panel: {len(self.gaussian_fits)}, {amp:.2f}, {mu:.4f}, {sigma:.4f}")
-                    self.parent_dialog.fit_info_panel.add_fit(len(self.gaussian_fits), amp, mu, sigma, (x_min, x_max), fit_color)
+                    fit_num = len(self.gaussian_fits)  # 现在长度已经包含了新的拟合
+                    print(f"Adding fit to panel: {fit_num}, {amp:.2f}, {mu:.4f}, {sigma:.4f}")
+                    self.parent_dialog.fit_info_panel.add_fit(fit_num, amp, mu, sigma, (x_min, x_max), fit_color)
                 
                 # 收集拟合信息字符串
                 # 全部拟合信息
@@ -1048,6 +1050,9 @@ class HistogramPlot(FigureCanvas):
             # 重置拟合信息字符串
             self.fit_info_str = "No fits yet"
             
+            # 重置高亮索引
+            self.highlighted_fit_index = -1
+            
             # 清除拟合信息面板
             if hasattr(self, 'parent_dialog') and self.parent_dialog and hasattr(self.parent_dialog, 'fit_info_panel'):
                 self.parent_dialog.fit_info_panel.clear_all_fits()
@@ -1063,40 +1068,145 @@ class HistogramPlot(FigureCanvas):
     def delete_specific_fit(self, fit_index):
         """删除特定的拟合"""
         try:
-            if not hasattr(self, 'gaussian_fits'):
-                return
-                
-            # 查找对应索引的拟合
-            for i, fit in enumerate(self.gaussian_fits):
-                if len(self.gaussian_fits) == fit_index or i+1 == fit_index:  # 支持以集合索引或显示索引查找
-                    # 移除环境中的元素
-                    if 'line' in fit and fit['line'] in self.ax.lines:
-                        fit['line'].remove()
-                    if 'text' in fit:
-                        fit['text'].remove()
-                    
-                    # 移除相关的区域高亮
-                    for j, (x_min, x_max, region) in enumerate(self.fit_regions):
-                        if j == i:  # 假设区域和拟合是一一对应的
-                            if region in self.ax.patches:
-                                region.remove()
-                            self.fit_regions.pop(j)
-                            break
-                    
-                    # 从列表中移除
-                    self.gaussian_fits.pop(i)
-                    
-                    # 重新绘制
-                    self.draw()
-                    return True
+            if not hasattr(self, 'gaussian_fits') or len(self.gaussian_fits) == 0:
+                return False
             
-            return False  # 返回是否成功删除
+            # 查找对应的拟合项（使用显示索引从1开始）
+            target_index = -1
+            for i, fit in enumerate(self.gaussian_fits):
+                if (i + 1) == fit_index:  # 显示索引从1开始
+                    target_index = i
+                    break
+            
+            if target_index == -1:
+                print(f"Could not find fit with index {fit_index}")
+                return False
+            
+            fit = self.gaussian_fits[target_index]
+            
+            # 从图中移除元素
+            if 'line' in fit and fit['line'] in self.ax.lines:
+                fit['line'].remove()
+            if 'text' in fit:
+                fit['text'].remove()
+            
+            # 移除相关的区域高亮
+            if hasattr(self, 'fit_regions') and target_index < len(self.fit_regions):
+                _, _, region = self.fit_regions[target_index]
+                if region in self.ax.patches:
+                    region.remove()
+                self.fit_regions.pop(target_index)
+            
+            # 从列表中移除
+            self.gaussian_fits.pop(target_index)
+            
+            # 重新编号剩余的拟合和更新显示
+            self._renumber_fits()
+            
+            # 更新拟合信息字符串
+            self.update_fit_info_string()
+            
+            # 重置高亮索引
+            if self.highlighted_fit_index >= len(self.gaussian_fits):
+                self.highlighted_fit_index = -1
+            
+            # 重新绘制
+            self.draw()
+            
+            print(f"Successfully deleted fit {fit_index}")
+            return True
                 
         except Exception as e:
             print(f"Error in delete_specific_fit: {e}")
             import traceback
             traceback.print_exc()
             return False
+    
+    def _renumber_fits(self):
+        """重新编号拟合项目并更新显示"""
+        try:
+            # 先清除拟合信息面板
+            if hasattr(self, 'parent_dialog') and self.parent_dialog and hasattr(self.parent_dialog, 'fit_info_panel'):
+                self.parent_dialog.fit_info_panel.clear_all_fits()
+            
+            # 重新添加所有拟合项
+            for i, fit in enumerate(self.gaussian_fits):
+                amp, mu, sigma = fit['popt']
+                x_range = fit['x_range']
+                color = fit['color']
+                
+                # 更新文本标签
+                new_fit_num = i + 1
+                if 'text' in fit:
+                    fit['text'].set_text(f"G{new_fit_num}: μ={mu:.3f}, σ={sigma:.3f}")
+                
+                # 重新添加到拟合信息面板
+                if hasattr(self, 'parent_dialog') and self.parent_dialog and hasattr(self.parent_dialog, 'fit_info_panel'):
+                    self.parent_dialog.fit_info_panel.add_fit(new_fit_num, amp, mu, sigma, x_range, color)
+        
+        except Exception as e:
+            print(f"Error in _renumber_fits: {e}")
+            import traceback
+            traceback.print_exc()
+    
+    def delete_multiple_fits(self, fit_indices):
+        """批量删除多个拟合"""
+        try:
+            if not hasattr(self, 'gaussian_fits') or len(self.gaussian_fits) == 0:
+                return 0
+            
+            deleted_count = 0
+            # 从大到小排序的实际索引（数组索引）
+            actual_indices = []
+            for fit_index in fit_indices:
+                for i, fit in enumerate(self.gaussian_fits):
+                    if (i + 1) == fit_index:  # 显示索引转换为数组索引
+                        actual_indices.append(i)
+                        break
+            
+            # 按实际索引从大到小排序，避免删除时索引变化
+            for actual_index in sorted(set(actual_indices), reverse=True):
+                if actual_index < len(self.gaussian_fits):
+                    fit = self.gaussian_fits[actual_index]
+                    
+                    # 从图中移除元素
+                    if 'line' in fit and fit['line'] in self.ax.lines:
+                        fit['line'].remove()
+                    if 'text' in fit:
+                        fit['text'].remove()
+                    
+                    # 移除相关的区域高亮
+                    if hasattr(self, 'fit_regions') and actual_index < len(self.fit_regions):
+                        _, _, region = self.fit_regions[actual_index]
+                        if region in self.ax.patches:
+                            region.remove()
+                        self.fit_regions.pop(actual_index)
+                    
+                    # 从列表中移除
+                    self.gaussian_fits.pop(actual_index)
+                    deleted_count += 1
+            
+            if deleted_count > 0:
+                # 重新编号剩余的拟合
+                self._renumber_fits()
+                
+                # 更新拟合信息字符串
+                self.update_fit_info_string()
+                
+                # 重置高亮索引
+                if self.highlighted_fit_index >= len(self.gaussian_fits):
+                    self.highlighted_fit_index = -1
+                
+                # 重新绘制
+                self.draw()
+            
+            return deleted_count
+            
+        except Exception as e:
+            print(f"Error in delete_multiple_fits: {e}")
+            import traceback
+            traceback.print_exc()
+            return 0
     
     def update_specific_fit(self, fit_index, new_params):
         """更新特定拟合的参数"""
@@ -1106,7 +1216,7 @@ class HistogramPlot(FigureCanvas):
                 
             # 查找对应索引的拟合
             for i, fit in enumerate(self.gaussian_fits):
-                if len(self.gaussian_fits) == fit_index or i+1 == fit_index:  # 支持以集合索引或显示索引查找
+                if (i + 1) == fit_index:  # 使用显示索引（从1开始）进行匹配
                     # 获取当前拟合的x范围
                     x_range = fit['x_range']
                     color = fit['color']
@@ -1131,7 +1241,7 @@ class HistogramPlot(FigureCanvas):
                         fit['text'].remove()
                     
                     # 创建新的曲线和文本
-                    line, = self.ax.plot(x_fit, y_fit, '-', linewidth=2.5, color=color, zorder=15)
+                    line, = self.ax.plot(x_fit, y_fit, '-', linewidth=1.5, color=color, zorder=15)
                     
                     # 更新呈现参数
                     fit_num = i + 1
@@ -1174,22 +1284,28 @@ class HistogramPlot(FigureCanvas):
     def highlight_specific_fit(self, fit_index):
         """高亮显示特定的拟合"""
         try:
-            if not hasattr(self, 'gaussian_fits'):
+            if not hasattr(self, 'gaussian_fits') or len(self.gaussian_fits) == 0:
                 return False
-                
-            # 取消之前的高亮
-            if self.highlighted_fit_index >= 0 and self.highlighted_fit_index < len(self.gaussian_fits):
-                old_fit = self.gaussian_fits[self.highlighted_fit_index]
-                if 'line' in old_fit:
-                    old_fit['line'].set_linewidth(2.5)  # 恢复正常线宽
-                
+            
+            # 先恢复所有线条的正常粗细
+            for fit in self.gaussian_fits:
+                if 'line' in fit:
+                    fit['line'].set_linewidth(1.5)
+            
+            # 处理取消所有选中的情况（fit_index为-1或无效值）
+            if fit_index == -1:
+                # 取消所有高亮，所有曲线保持相同粗细
+                self.highlighted_fit_index = -1
+                self.draw()
+                return True
+            
             # 查找对应索引的拟合
             actual_index = -1
             for i, fit in enumerate(self.gaussian_fits):
-                if len(self.gaussian_fits) == fit_index or i+1 == fit_index:  # 支持以集合索引或显示索引查找
+                if (i + 1) == fit_index:  # 使用显示索引（从1开始）进行匹配
                     # 高亮显示该拟合
                     if 'line' in fit:
-                        fit['line'].set_linewidth(4.0)  # 增加线宽高亮显示
+                        fit['line'].set_linewidth(3.0)  # 增加线宽高亮显示
                     
                     # 记录当前高亮的索引
                     self.highlighted_fit_index = i
@@ -1201,7 +1317,9 @@ class HistogramPlot(FigureCanvas):
                 self.draw()
                 return True
             else:
+                # 如果没有找到对应的拟合索引，取消所有高亮
                 self.highlighted_fit_index = -1
+                self.draw()
                 return False
                 
         except Exception as e:

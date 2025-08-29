@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-标签页UI组件
+标签页UI组件 - Updated with AC Notch Filter Support
 """
 
 from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QTextEdit, 
@@ -395,7 +395,15 @@ class ProcessingTab(QWidget):
         self.operation_layout = QVBoxLayout()
         
         self.operation_combo = QComboBox()
-        self.operation_combo.addItems(["Select operation...", "Trim", "Low-pass Filter", "High-pass Filter", "Baseline Correction"])
+        # ADD AC Notch Filter to the list
+        self.operation_combo.addItems([
+            "Select operation...", 
+            "Trim", 
+            "Low-pass Filter", 
+            "High-pass Filter", 
+            "AC Notch Filter",  # NEW: Add AC Notch Filter option
+            "Baseline Correction"
+        ])
         self.operation_combo.setStyleSheet("""
             QComboBox {
                 padding: 6px;
@@ -467,15 +475,6 @@ class ProcessingTab(QWidget):
         self.operation_combo.setMinimumWidth(200)
         self.channel_combo.setMinimumWidth(200)
 
-        # # 时间模式选择已移动到参数配置中
-        # self.time_mode_layout = QHBoxLayout()
-        # self.time_mode_label = QLabel("时间模式:")
-        # self.time_mode_combo = QComboBox()
-        # self.time_mode_combo.addItem("相对时间 (从0开始计算)", "relative")
-        # self.time_mode_combo.addItem("绝对时间 (使用原始时间)", "absolute")
-        # self.time_mode_layout.addWidget(self.time_mode_label)
-        # self.time_mode_layout.addWidget(self.time_mode_combo)
-        
         # 操作按钮
         # 创建美观的按钮
         self.process_button = QPushButton("Process Data")
@@ -507,6 +506,7 @@ class ProcessingTab(QWidget):
             "Trim": "裁切",
             "Low-pass Filter": "低通滤波",
             "High-pass Filter": "高通滤波", 
+            "AC Notch Filter": "AC_Notch_Filter",  # NEW: Add AC Notch Filter mapping
             "Baseline Correction": "基线校正"
         }
 
@@ -568,6 +568,49 @@ class ProcessingTab(QWidget):
             
             self.params_layout.addRow("Cutoff Frequency:", cutoff_spin)
             self.param_widgets["cutoff_hz"] = cutoff_spin
+        
+        # NEW: Add AC Notch Filter parameter setup
+        elif self.current_operation == "AC_Notch_Filter":  # AC Notch Filter
+            # Add description label
+            ac_desc_label = QLabel("Remove AC power line interference and harmonics")
+            ac_desc_label.setStyleSheet("color: #0078d7; font-style: italic;")
+            self.params_layout.addRow("", ac_desc_label)
+            
+            # Power frequency selector
+            power_freq_combo = QComboBox()
+            power_freq_combo.addItems(["60 Hz (US Standard)", "50 Hz (China Standard)"])
+            power_freq_combo.setCurrentIndex(0)  # Default to 60Hz as requested
+            power_freq_combo.setMinimumWidth(200)
+            
+            self.params_layout.addRow("Power Frequency:", power_freq_combo)
+            self.param_widgets["power_frequency"] = power_freq_combo
+            
+            # Quality factor
+            quality_spin = QSpinBox()
+            quality_spin.setRange(10, 100)
+            quality_spin.setValue(30)
+            quality_spin.setToolTip("Higher values create narrower notches")
+            quality_spin.setMinimumWidth(200)
+            
+            self.params_layout.addRow("Quality Factor:", quality_spin)
+            self.param_widgets["quality_factor"] = quality_spin
+            
+            # Remove harmonics checkbox
+            harmonics_check = QCheckBox()
+            harmonics_check.setChecked(True)
+            harmonics_check.setText("Also remove 2nd, 3rd, 4th, and 5th harmonics")
+            
+            self.params_layout.addRow("Remove Harmonics:", harmonics_check)
+            self.param_widgets["remove_harmonics"] = harmonics_check
+            
+            # Max harmonic
+            max_harmonic_spin = QSpinBox()
+            max_harmonic_spin.setRange(2, 10)
+            max_harmonic_spin.setValue(5)
+            max_harmonic_spin.setMinimumWidth(200)
+            
+            self.params_layout.addRow("Max Harmonic:", max_harmonic_spin)
+            self.param_widgets["max_harmonic"] = max_harmonic_spin
             
         elif self.current_operation == "基线校正":  # Baseline Correction
             points_spin = QSpinBox()
@@ -584,12 +627,24 @@ class ProcessingTab(QWidget):
             return None
         
         params = {}
+        
         # 添加所有通用参数
         for key, widget in self.param_widgets.items():
             # QComboBox需要特殊处理来获取数据值
             if isinstance(widget, QComboBox):
-                data_index = widget.currentIndex()
-                params[key] = widget.itemData(data_index)
+                if key == "power_frequency":  # Special handling for AC notch filter
+                    freq_text = widget.currentText()
+                    if "60 Hz" in freq_text:
+                        params[key] = 60
+                    elif "50 Hz" in freq_text:
+                        params[key] = 50
+                    else:
+                        params[key] = 60  # Default fallback
+                else:
+                    data_index = widget.currentIndex()
+                    params[key] = widget.itemData(data_index)
+            elif isinstance(widget, QCheckBox):
+                params[key] = widget.isChecked()
             else:
                 params[key] = widget.value()
         
@@ -597,6 +652,143 @@ class ProcessingTab(QWidget):
         selected_channel = self.channel_combo.currentText()
         if selected_channel != "All Channels":
             params["channel"] = selected_channel
+        
+        return params
+    
+    # Add to your ProcessingTab class in gui/tabs.py
+
+    def setup_ac_notch_filter_ui(self):
+        """Setup AC notch filter UI components"""
+        # Add AC Notch Filter to your operation mappings
+        if not hasattr(self, 'operation_mappings'):
+            self.operation_mappings = {}
+        
+        self.operation_mappings["AC Notch Filter"] = "AC_Notch_Filter"
+        
+        # Add AC notch filter specific parameters
+        self.ac_notch_params = {}
+    
+        # Power frequency selector
+        power_freq_layout = QHBoxLayout()
+        power_freq_label = QLabel("Power Frequency:")
+        self.power_freq_combo = QComboBox()
+        self.power_freq_combo.addItems(["60 Hz (US Standard)", "50 Hz (China Standard)"])
+        self.power_freq_combo.setCurrentIndex(0)  # Default to 60Hz as requested
+        
+        power_freq_layout.addWidget(power_freq_label)
+        power_freq_layout.addWidget(self.power_freq_combo)
+        
+        # Quality factor
+        quality_layout = QHBoxLayout()
+        quality_label = QLabel("Quality Factor:")
+        self.quality_spinbox = QSpinBox()
+        self.quality_spinbox.setRange(10, 100)
+        self.quality_spinbox.setValue(30)
+        self.quality_spinbox.setToolTip("Higher values create narrower notches")
+        
+        quality_layout.addWidget(quality_label)
+        quality_layout.addWidget(self.quality_spinbox)
+        
+        # Remove harmonics checkbox
+        self.remove_harmonics_check = QCheckBox("Remove Harmonics")
+        self.remove_harmonics_check.setChecked(True)
+        self.remove_harmonics_check.setToolTip("Also remove 2nd, 3rd, 4th, and 5th harmonics")
+        
+        # Max harmonic
+        harmonic_layout = QHBoxLayout()
+        harmonic_label = QLabel("Max Harmonic:")
+        self.max_harmonic_spinbox = QSpinBox()
+        self.max_harmonic_spinbox.setRange(2, 10)
+        self.max_harmonic_spinbox.setValue(5)
+        
+        harmonic_layout.addWidget(harmonic_label)
+        harmonic_layout.addWidget(self.max_harmonic_spinbox)
+        
+        # Store widgets for later access
+        self.ac_notch_params = {
+            'power_freq_combo': self.power_freq_combo,
+            'quality_spinbox': self.quality_spinbox,
+            'remove_harmonics_check': self.remove_harmonics_check,
+            'max_harmonic_spinbox': self.max_harmonic_spinbox,
+            'layouts': [power_freq_layout, quality_layout, harmonic_layout]
+        }
+
+    def get_ac_notch_parameters(self):
+        """Get AC notch filter parameters from UI"""
+        if not hasattr(self, 'ac_notch_params'):
+            return {}
+        
+        # Extract frequency value from combo box text
+        freq_text = self.power_freq_combo.currentText()
+        if "60 Hz" in freq_text:
+            power_frequency = 60
+        elif "50 Hz" in freq_text:
+            power_frequency = 50
+        else:
+            power_frequency = 60  # Default fallback
+        
+        params = {
+            "power_frequency": power_frequency,
+            "quality_factor": self.quality_spinbox.value(),
+            "remove_harmonics": self.remove_harmonics_check.isChecked(),
+            "max_harmonic": self.max_harmonic_spinbox.value()
+        }
+        
+        return params
+
+    def update_parameter_ui(self, operation):
+        """Update parameter UI based on selected operation"""
+        # Hide all parameter widgets first
+        self.hide_all_parameter_widgets()
+        
+        # Show relevant widgets based on operation
+        if operation == "AC_Notch_Filter":
+            self.show_ac_notch_widgets()
+        # ... other operations ...
+
+    def show_ac_notch_widgets(self):
+        """Show AC notch filter parameter widgets"""
+        if hasattr(self, 'ac_notch_params'):
+            for layout in self.ac_notch_params['layouts']:
+                self.show_layout_widgets(layout)
+            self.remove_harmonics_check.show()
+
+    def hide_all_parameter_widgets(self):
+        """Hide all parameter widgets"""
+        if hasattr(self, 'ac_notch_params'):
+            for layout in self.ac_notch_params['layouts']:
+                self.hide_layout_widgets(layout)
+            self.remove_harmonics_check.hide()
+
+    def show_layout_widgets(self, layout):
+        """Show all widgets in a layout"""
+        for i in range(layout.count()):
+            widget = layout.itemAt(i).widget()
+            if widget:
+                widget.show()
+
+    def hide_layout_widgets(self, layout):
+        """Hide all widgets in a layout"""
+        for i in range(layout.count()):
+            widget = layout.itemAt(i).widget()
+            if widget:
+                widget.hide()
+
+    # Modify your get_parameters method to include AC notch filter
+    def get_parameters(self):
+        """Get current processing parameters"""
+        params = {}
+        
+        # Get selected channel
+        if hasattr(self, 'channel_combo'):
+            selected_channel = self.channel_combo.currentText()
+            if selected_channel != "All Channels":
+                params["channel"] = selected_channel
+        
+        # Get operation-specific parameters
+        if self.current_operation == "AC_Notch_Filter":
+            params.update(self.get_ac_notch_parameters())
+        # ... handle other operations ...
         
         return params
 

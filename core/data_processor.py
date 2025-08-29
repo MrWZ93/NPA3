@@ -495,13 +495,139 @@ class FileDataProcessor:
                                     except Exception as e:
                                         return False, None, f"Filter design error: {str(e)}"
                             
-                            elif operation == "基线校正":
-                                # 特殊处理Time通道 - 不对时间通道进行基线校正
+                            # NEW AC NOTCH FILTER IMPLEMENTATION
+                            elif operation == "AC_Notch_Filter":
+                                # Get parameters with defaults (60Hz US standard)
+                                power_freq = params.get("power_frequency", 60)  # 60Hz (US) or 50Hz (China)
+                                quality_factor = params.get("quality_factor", 30)  # Q factor for notch width
+                                remove_harmonics = params.get("remove_harmonics", True)  # Remove harmonic frequencies
+                                max_harmonic = params.get("max_harmonic", 5)  # Up to 5th harmonic
+                                
+                                # Skip time channel
                                 if channel == "Time":
                                     processed_data[channel] = data.copy()
                                 else:
-                                    baseline = params.get("baseline", np.mean(data[:params.get("points", 100)]))
-                                    processed_data[channel] = data - baseline
+                                    try:
+                                        # Create list of frequencies to remove
+                                        frequencies_to_notch = [power_freq]
+                                        
+                                        # Add harmonics if requested
+                                        if remove_harmonics:
+                                            nyquist_freq = sampling_rate / 2
+                                            for harmonic in range(2, max_harmonic + 1):
+                                                harmonic_freq = power_freq * harmonic
+                                                # Only add if below 95% of Nyquist frequency
+                                                if harmonic_freq < nyquist_freq * 0.95:
+                                                    frequencies_to_notch.append(harmonic_freq)
+                                        
+                                        # Apply notch filters sequentially
+                                        filtered_data = data.copy().astype(np.float64)
+                                        
+                                        for freq in frequencies_to_notch:
+                                            # Design IIR notch filter
+                                            b, a = signal.iirnotch(freq, quality_factor, sampling_rate)
+                                            # Apply zero-phase filtering to avoid phase distortion
+                                            filtered_data = signal.filtfilt(b, a, filtered_data)
+                                        
+                                        processed_data[channel] = filtered_data
+                                        
+                                        # Print applied frequencies for verification
+                                        print(f"AC Notch Filter applied to {channel}: removed frequencies {frequencies_to_notch} Hz")
+                                        
+                                    except Exception as e:
+                                        return False, None, f"AC notch filter error: {str(e)}"
+                            
+                            elif operation == "陷波滤波":
+                                # 获取陷波频率和参数
+                                notch_freq = params.get("notch_freq", 50)  # 默认50Hz（中国）
+                                quality_factor = params.get("quality_factor", 30)  # Q值，控制陷波宽度
+                                remove_harmonics = params.get("remove_harmonics", True)  # 是否移除谐波
+                                max_harmonic = params.get("max_harmonic", 5)  # 最大谐波次数
+                                
+                                # 特殊处理Time通道 - 不对时间通道应用滤波
+                                if channel == "Time":
+                                    processed_data[channel] = data.copy()
+                                else:
+                                    try:
+                                        # 创建待滤除的频率列表
+                                        frequencies_to_remove = [notch_freq]
+                                        
+                                        if remove_harmonics:
+                                            # 添加谐波频率
+                                            for harmonic in range(2, max_harmonic + 1):
+                                                harmonic_freq = notch_freq * harmonic
+                                                # 确保谐波频率小于奈奎斯特频率
+                                                nyquist = sampling_rate / 2
+                                                if harmonic_freq < nyquist * 0.95:  # 留5%余量
+                                                    frequencies_to_remove.append(harmonic_freq)
+                                        
+                                        # 应用陷波滤波器
+                                        filtered_data = data.copy()
+                                        for freq in frequencies_to_remove:
+                                            # 设计陷波滤波器
+                                            b, a = signal.iirnotch(freq, quality_factor, sampling_rate)
+                                            # 应用滤波器（使用filtfilt以避免相位延迟）
+                                            filtered_data = signal.filtfilt(b, a, filtered_data)
+                                        
+                                        processed_data[channel] = filtered_data
+                                        
+                                    except Exception as e:
+                                        return False, None, f"陷波滤波器设计错误: {str(e)}"
+                            
+                            elif operation == "交流电去噪":
+                                # 简化的交流电去噪接口（自动选择参数）
+                                region = params.get("region", "中国")  # "中国" 或 "美国"
+                                strength = params.get("strength", "标准")  # "轻度", "标准", "强力"
+                                
+                                # 根据地区设置基频
+                                if region == "中国":
+                                    base_freq = 50
+                                elif region == "美国":
+                                    base_freq = 60
+                                else:
+                                    base_freq = params.get("custom_freq", 50)
+                                
+                                # 根据强度设置参数
+                                if strength == "轻度":
+                                    quality_factor = 15  # 较宽的陷波
+                                    max_harmonic = 3
+                                elif strength == "标准":
+                                    quality_factor = 30  # 中等宽度
+                                    max_harmonic = 5
+                                elif strength == "强力":
+                                    quality_factor = 50  # 较窄但更深的陷波
+                                    max_harmonic = 7
+                                else:
+                                    quality_factor = 30
+                                    max_harmonic = 5
+                                
+                                # 特殊处理Time通道
+                                if channel == "Time":
+                                    processed_data[channel] = data.copy()
+                                else:
+                                    try:
+                                        # 创建待滤除的频率列表（基频+谐波）
+                                        frequencies_to_remove = [base_freq]
+                                        
+                                        for harmonic in range(2, max_harmonic + 1):
+                                            harmonic_freq = base_freq * harmonic
+                                            # 确保谐波频率小于奈奎斯特频率
+                                            nyquist = sampling_rate / 2
+                                            if harmonic_freq < nyquist * 0.95:
+                                                frequencies_to_remove.append(harmonic_freq)
+                                        
+                                        # 应用陷波滤波器组
+                                        filtered_data = data.copy()
+                                        for freq in frequencies_to_remove:
+                                            b, a = signal.iirnotch(freq, quality_factor, sampling_rate)
+                                            filtered_data = signal.filtfilt(b, a, filtered_data)
+                                        
+                                        processed_data[channel] = filtered_data
+                                        
+                                        print(f"交流电去噪应用于通道 {channel}: 移除频率 {frequencies_to_remove} Hz")
+                                        
+                                    except Exception as e:
+                                        return False, None, f"交流电去噪错误: {str(e)}"
                             
                             else:
                                 processed_data[channel] = data.copy()
@@ -588,82 +714,146 @@ class FileDataProcessor:
                         except Exception as e:
                             return False, None, f"Filter design error: {str(e)}"
                     
-                    elif operation == "基线校正":
-                        if data.ndim == 1:
-                            baseline = np.mean(data[:params.get("points", 100)])
-                            processed_data = data - baseline
+                    # NEW AC NOTCH FILTER FOR NUMPY ARRAYS
+                    elif operation == "AC_Notch_Filter":
+                        # Get parameters with defaults (60Hz US standard)
+                        power_freq = params.get("power_frequency", 60)  # 60Hz (US) or 50Hz (China)
+                        quality_factor = params.get("quality_factor", 30)  # Q factor for notch width
+                        remove_harmonics = params.get("remove_harmonics", True)  # Remove harmonic frequencies
+                        max_harmonic = params.get("max_harmonic", 5)  # Up to 5th harmonic
+                        
+                        try:
+                            # Create list of frequencies to remove
+                            frequencies_to_notch = [power_freq]
+                            
+                            # Add harmonics if requested
+                            if remove_harmonics:
+                                nyquist_freq = sampling_rate / 2
+                                for harmonic in range(2, max_harmonic + 1):
+                                    harmonic_freq = power_freq * harmonic
+                                    # Only add if below 95% of Nyquist frequency
+                                    if harmonic_freq < nyquist_freq * 0.95:
+                                        frequencies_to_notch.append(harmonic_freq)
+                            
+                            # Apply notch filters
+                            if data.ndim == 1:
+                                # Single channel data
+                                filtered_data = data.copy().astype(np.float64)
+                                for freq in frequencies_to_notch:
+                                    b, a = signal.iirnotch(freq, quality_factor, sampling_rate)
+                                    filtered_data = signal.filtfilt(b, a, filtered_data)
+                                processed_data = filtered_data
+                            else:
+                                # Multi-channel data
+                                processed_data = np.zeros_like(data, dtype=np.float64)
+                                for i in range(data.shape[1]):
+                                    filtered_data = data[:, i].copy().astype(np.float64)
+                                    for freq in frequencies_to_notch:
+                                        b, a = signal.iirnotch(freq, quality_factor, sampling_rate)
+                                        filtered_data = signal.filtfilt(b, a, filtered_data)
+                                    processed_data[:, i] = filtered_data
+                            
+                            # Print applied frequencies for verification
+                            print(f"AC Notch Filter applied: removed frequencies {frequencies_to_notch} Hz")
+                            
+                        except Exception as e:
+                            return False, None, f"AC notch filter error: {str(e)}"
+                    
+                    elif operation == "陷波滤波":
+                        # 获取陷波参数
+                        notch_freq = params.get("notch_freq", 50)  # 默认50Hz
+                        quality_factor = params.get("quality_factor", 30)
+                        remove_harmonics = params.get("remove_harmonics", True)
+                        max_harmonic = params.get("max_harmonic", 5)
+                        
+                        try:
+                            # 创建待滤除的频率列表
+                            frequencies_to_remove = [notch_freq]
+                            
+                            if remove_harmonics:
+                                for harmonic in range(2, max_harmonic + 1):
+                                    harmonic_freq = notch_freq * harmonic
+                                    nyquist = sampling_rate / 2
+                                    if harmonic_freq < nyquist * 0.95:
+                                        frequencies_to_remove.append(harmonic_freq)
+                            
+                            # 应用陷波滤波器
+                            if data.ndim == 1:
+                                filtered_data = data.copy()
+                                for freq in frequencies_to_remove:
+                                    b, a = signal.iirnotch(freq, quality_factor, sampling_rate)
+                                    filtered_data = signal.filtfilt(b, a, filtered_data)
+                                processed_data = filtered_data
+                            else:
+                                # 对多通道数据
+                                processed_data = np.zeros_like(data)
+                                for i in range(data.shape[1]):
+                                    filtered_data = data[:, i].copy()
+                                    for freq in frequencies_to_remove:
+                                        b, a = signal.iirnotch(freq, quality_factor, sampling_rate)
+                                        filtered_data = signal.filtfilt(b, a, filtered_data)
+                                    processed_data[:, i] = filtered_data
+                        except Exception as e:
+                            return False, None, f"陷波滤波器设计错误: {str(e)}"
+                    
+                    elif operation == "交流电去噪":
+                        # 简化的交流电去噪
+                        region = params.get("region", "中国")
+                        strength = params.get("strength", "标准")
+                        
+                        # 设置基频
+                        if region == "中国":
+                            base_freq = 50
+                        elif region == "美国":
+                            base_freq = 60
                         else:
-                            processed_data = data.copy()
-                            for i in range(data.shape[1]):
-                                baseline = np.mean(data[:params.get("points", 100), i])
-                                processed_data[:, i] = data[:, i] - baseline
+                            base_freq = params.get("custom_freq", 50)
+                        
+                        # 设置参数
+                        if strength == "轻度":
+                            quality_factor = 15
+                            max_harmonic = 3
+                        elif strength == "标准":
+                            quality_factor = 30
+                            max_harmonic = 5
+                        elif strength == "强力":
+                            quality_factor = 50
+                            max_harmonic = 7
+                        else:
+                            quality_factor = 30
+                            max_harmonic = 5
+                        
+                        try:
+                            # 创建频率列表
+                            frequencies_to_remove = [base_freq]
+                            for harmonic in range(2, max_harmonic + 1):
+                                harmonic_freq = base_freq * harmonic
+                                nyquist = sampling_rate / 2
+                                if harmonic_freq < nyquist * 0.95:
+                                    frequencies_to_remove.append(harmonic_freq)
+                            
+                            # 应用滤波器
+                            if data.ndim == 1:
+                                filtered_data = data.copy()
+                                for freq in frequencies_to_remove:
+                                    b, a = signal.iirnotch(freq, quality_factor, sampling_rate)
+                                    filtered_data = signal.filtfilt(b, a, filtered_data)
+                                processed_data = filtered_data
+                            else:
+                                processed_data = np.zeros_like(data)
+                                for i in range(data.shape[1]):
+                                    filtered_data = data[:, i].copy()
+                                    for freq in frequencies_to_remove:
+                                        b, a = signal.iirnotch(freq, quality_factor, sampling_rate)
+                                        filtered_data = signal.filtfilt(b, a, filtered_data)
+                                    processed_data[:, i] = filtered_data
+                            
+                            print(f"交流电去噪应用: 移除频率 {frequencies_to_remove} Hz")
+                        except Exception as e:
+                            return False, None, f"交流电去噪错误: {str(e)}"
                     
                     else:
                         processed_data = data.copy()
-                
-                elif data.ndim == 2 and selected_channel:
-                    # 如果是2D数组且选择了特定通道
-                    # 提取选择的通道索引
-                    try:
-                        if selected_channel.startswith("Channel "):
-                            # 从"Channel X"形式中提取索引
-                            channel_idx = int(selected_channel.split(" ")[1]) - 1
-                            if channel_idx < 0 or channel_idx >= data.shape[1]:
-                                return False, None, f"Invalid channel index: {channel_idx}"
-                        else:
-                            # 尝试将其解析为数字
-                            channel_idx = int(selected_channel) - 1
-                    except:
-                        return False, None, f"Cannot parse channel: {selected_channel}"
-                    
-                    # 创建与原始数据相同的数组，只处理选定通道
-                    processed_data = data.copy()
-                    
-                    if operation == "裁切":
-                        # Get time values
-                        start_time = params.get("start_time", 0)
-                        end_time = params.get("end_time", len(data) / sampling_rate)
-                        
-                        # Convert time to samples
-                        start_sample = int(start_time * sampling_rate)
-                        end_sample = int(end_time * sampling_rate)
-                        
-                        # Make sure indices are within bounds
-                        start_sample = max(0, min(start_sample, data.shape[0] - 1))
-                        end_sample = max(start_sample + 1, min(end_sample, data.shape[0]))
-                        
-                        # 只处理选定通道
-                        processed_data = data[start_sample:end_sample, :]
-                    
-                    elif operation in ["低通滤波", "高通滤波"]:
-                        # Get frequency in Hz
-                        cutoff_hz = params.get("cutoff_hz", 1000)
-                        
-                        # Safety check: ensure cutoff is less than Nyquist frequency
-                        nyquist = sampling_rate / 2
-                        if cutoff_hz >= nyquist:
-                            # If cutoff is too high, set it to 99% of Nyquist
-                            cutoff_hz = 0.99 * nyquist
-                        
-                        # Convert to normalized frequency (0-1) required by scipy.signal.butter
-                        cutoff_norm = cutoff_hz / nyquist
-                        
-                        try:
-                            # Design the filter
-                            if operation == "低通滤波":
-                                b, a = signal.butter(4, cutoff_norm, 'low')
-                            else:  # 高通滤波
-                                b, a = signal.butter(4, cutoff_norm, 'high')
-                            
-                            # 只对选定通道应用滤波器
-                            processed_data[:, channel_idx] = signal.filtfilt(b, a, data[:, channel_idx])
-                        except Exception as e:
-                            return False, None, f"Filter design error: {str(e)}"
-                    
-                    elif operation == "基线校正":
-                        # 只对选定通道进行基线校正
-                        baseline = np.mean(data[:params.get("points", 100), channel_idx])
-                        processed_data[:, channel_idx] = data[:, channel_idx] - baseline
 
             # 将悬浮的NaN值设为0
             if isinstance(processed_data, dict):
@@ -688,7 +878,7 @@ class FileDataProcessor:
             
         except Exception as e:
             return False, None, f"Processing error: {str(e)}"
-    
+
     def save_processed_data(self, data, save_path):
         """保存处理后的数据为H5格式"""
         try:

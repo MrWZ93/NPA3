@@ -133,8 +133,8 @@ if __name__ == "__main__":
                     if hasattr(thread, 'join') and thread.is_alive():
                         # 尝试在短时间内等待线程结束
                         thread.join(0.1)
-        except:
-            pass
+        except Exception as e:
+            print(f"清理线程时出错: {str(e)}")
     
     app.aboutToQuit.connect(cleanup)
     

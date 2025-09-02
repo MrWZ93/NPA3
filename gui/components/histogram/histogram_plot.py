@@ -168,7 +168,7 @@ class HistogramPlot(FigureCanvas):
             return
         
         # 绘制全数据图
-        self.ax1.plot(time_axis, plot_data)
+        self.ax1.plot(time_axis, plot_data, linewidth=0.7)
         
         # 设置初始高亮区域（默认为前10%的数据）
         self.highlight_min = 0
@@ -192,7 +192,7 @@ class HistogramPlot(FigureCanvas):
         highlighted_time = time_axis[self.highlight_min:self.highlight_max]
         
         # 绘制高亮区域数据
-        self.ax2.plot(highlighted_time, highlighted_data)
+        self.ax2.plot(highlighted_time, highlighted_data, linewidth=0.7)
         
         # 绘制直方图
         counts, bins, _ = self.ax3.hist(
@@ -505,7 +505,7 @@ class HistogramPlot(FigureCanvas):
             return
         
         # 绘制高亮区域数据
-        self.ax2.plot(highlighted_time, highlighted_data)
+        self.ax2.plot(highlighted_time, highlighted_data, linewidth=0.7)
         
         # 设置对数轴 - 只对直方图生效
         if self.log_x:

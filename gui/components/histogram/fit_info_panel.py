@@ -9,7 +9,7 @@ from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel,
                             QPushButton, QListWidget, QListWidgetItem, 
                             QAbstractItemView, QMenu, QDialog, QFormLayout,
                             QDoubleSpinBox, QTabWidget, QGroupBox, QSplitter,
-                            QFrame, QToolButton, QLineEdit, QMessageBox)
+                            QFrame, QToolButton, QLineEdit, QMessageBox, QApplication)
 from PyQt6.QtCore import Qt, pyqtSignal, QSize, QPoint, QItemSelectionModel
 from PyQt6.QtGui import QColor, QBrush, QFont, QAction, QIcon
 
@@ -170,14 +170,20 @@ class FitInfoPanel(QWidget):
         title_label = QLabel("Fit Results")
         title_label.setStyleSheet("font-weight: bold; font-size: 12px;")
         
-        # 仅保留Copy按钮
+        # Copy按钮
         self.copy_btn = QToolButton()
         self.copy_btn.setText("Copy")
         self.copy_btn.setToolTip("Copy all fit data to clipboard")
         
+        # μσ复制按钮
+        self.copy_mu_sigma_btn = QToolButton()
+        self.copy_mu_sigma_btn.setText("μσ")
+        self.copy_mu_sigma_btn.setToolTip("Copy μ and σ values to clipboard for Excel")
+        
         title_layout.addWidget(title_label)
         title_layout.addStretch(1)
         title_layout.addWidget(self.copy_btn)
+        title_layout.addWidget(self.copy_mu_sigma_btn)
         
         layout.addLayout(title_layout)
         
@@ -237,6 +243,7 @@ class FitInfoPanel(QWidget):
         self.fit_list.itemSelectionChanged.connect(self.on_selection_changed)
         self.fit_list.customContextMenuRequested.connect(self.show_context_menu)
         self.copy_btn.clicked.connect(self.copy_all_fits.emit)
+        self.copy_mu_sigma_btn.clicked.connect(self.copy_mu_sigma_values)
         self.delete_selected_btn.clicked.connect(self.delete_selected_fits)
         self.toggle_labels_btn.clicked.connect(self.on_toggle_labels)
         
@@ -455,3 +462,29 @@ class FitInfoPanel(QWidget):
         
         # 发送信号通知控制器
         self.toggle_fit_labels.emit(not checked)  # 传递相反的值，因为checked=True表示按钮被按下，即隐藏标签
+    
+    def copy_mu_sigma_values(self):
+        """复制所有拟合结果的μ和σ值到剪贴板，适合Excel格式"""
+        if self.fit_list.count() == 0:
+            return
+        
+        # 收集所有拟合的μ和σ值，每行一个拟合结果
+        rows = []
+        
+        for i in range(self.fit_list.count()):
+            item = self.fit_list.item(i)
+            if item:
+                data = item.data(Qt.ItemDataRole.UserRole)
+                if data:
+                    # 每行格式：μ值 \t σ值
+                    row = f"{data['mu']:.4f}\t{data['sigma']:.4f}"
+                    rows.append(row)
+        
+        # 创建适合Excel的格式（每行包含一个拟合的μ和σ值）
+        clipboard_text = "\n".join(rows)
+        
+        # 复制到剪贴板
+        clipboard = QApplication.clipboard()
+        clipboard.setText(clipboard_text)
+        
+        print(f"Copied μ and σ values to clipboard: {len(rows)} fits")

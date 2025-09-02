@@ -66,7 +66,7 @@ class HistogramControlPanel(QWidget):
         bins_layout.addWidget(QLabel("Bins:"))
         self.bins_spin = QSpinBox()
         self.bins_spin.setRange(5, 500)
-        self.bins_spin.setValue(50)
+        self.bins_spin.setValue(200)
         self.bins_spin.setSingleStep(5)
         bins_layout.addWidget(self.bins_spin)
         
@@ -86,7 +86,7 @@ class HistogramControlPanel(QWidget):
         # KDE显示
         self.kde_check = QCheckBox("KDE")
         self.kde_check.setToolTip("Overlay a kernel density estimation curve on the histogram")
-        self.kde_check.setChecked(True)  # 默认勾选
+        self.kde_check.setChecked(False)  # 默认不勾选
         
         # 数据取反
         self.invert_data_check = QCheckBox("Invert")

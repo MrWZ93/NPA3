@@ -18,6 +18,8 @@ from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtGui import QIcon, QPixmap, QImage
 from PIL import Image
 
+from .settings_manager import SettingsManager
+
 
 class ExportToolsPanel(QGroupBox):
     """导出和复制工具面板"""
@@ -56,10 +58,23 @@ class IntegratedDataExporter:
     
     def __init__(self, dialog_instance):
         self.dialog = dialog_instance
+        self.settings_manager = SettingsManager()
         
     def export_comprehensive_data(self):
         """综合导出所有数据"""
         try:
+            # 获取上次保存的路径
+            settings = self.settings_manager.load_settings("histogram_export")
+            last_export_dir = settings.get("last_export_directory", "")
+            
+            # 如果没有保存的路径，使用程序所在路径
+            if not last_export_dir or not os.path.exists(last_export_dir):
+                # 获取程序所在路径
+                if hasattr(self.dialog.data_manager, 'file_path') and self.dialog.data_manager.file_path:
+                    last_export_dir = os.path.dirname(self.dialog.data_manager.file_path)
+                else:
+                    last_export_dir = os.getcwd()
+            
             # 获取基础文件名
             current_time = datetime.now().strftime("%Y%m%d_%H%M%S")
             if hasattr(self.dialog.data_manager, 'file_path') and self.dialog.data_manager.file_path:
@@ -68,16 +83,24 @@ class IntegratedDataExporter:
             else:
                 default_filename = f"histogram_export_{current_time}"
             
+            # 在上次保存的目录中设置默认文件名
+            default_path = os.path.join(last_export_dir, default_filename)
+            
             # 显示文件保存对话框
             file_path, _ = QFileDialog.getSaveFileName(
                 self.dialog,
                 "Export Comprehensive Data",
-                default_filename,
+                default_path,
                 "All Files (*)"
             )
             
             if not file_path:
                 return False, "Export cancelled by user"
+            
+            # 保存新选择的目录
+            new_export_dir = os.path.dirname(file_path)
+            settings["last_export_directory"] = new_export_dir
+            self.settings_manager.save_settings("histogram_export", settings)
             
             # 移除扩展名，使用基础文件名
             base_path = os.path.splitext(file_path)[0]

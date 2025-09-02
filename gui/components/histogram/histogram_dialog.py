@@ -226,7 +226,7 @@ class HistogramDialog(QDialog):
                         self.histogram_control.get_bins(),
                         log_x=False,  # 默认不启用X轴对数
                         log_y=False,  # 默认不启用Y轴对数
-                        show_kde=True,   # 默认启用KDE
+                        show_kde=False,   # 默认不启用KDE
                         invert_data=False,  # 默认不取反数据
                         file_name=file_name
                     )
@@ -312,7 +312,7 @@ class HistogramDialog(QDialog):
                     self.histogram_control.get_bins(),
                     log_x=False,  # 默认不启用X轴对数
                     log_y=False,  # 默认不启用Y轴对数
-                    show_kde=True,   # 默认启用KDE
+                    show_kde=False,   # 默认不启用KDE
                     invert_data=False,  # 默认不取反数据
                     file_name=file_name
                 )

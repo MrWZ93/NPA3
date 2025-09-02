@@ -216,18 +216,29 @@ class FileExplorerApp(QMainWindow):
         # 创建可视化控制标签页
         self.viz_controls_tab = VisualizationControlsTab()
         
-        self.tabs.addTab(self.details_tab, QIcon.fromTheme("dialog-information"), "File Details")
-        self.tabs.addTab(self.notes_tab, QIcon.fromTheme("accessories-text-editor"), "Notes")
-        self.tabs.addTab(self.processing_tab, QIcon.fromTheme("system-run"), "Data Processing")
-        self.tabs.addTab(self.viz_controls_tab, QIcon.fromTheme("preferences-desktop"), "Visualization Controls")
+        self.tabs.addTab(self.details_tab, QIcon.fromTheme("dialog-information"), "Info")
+        self.tabs.addTab(self.notes_tab, QIcon.fromTheme("accessories-text-editor"), "Note")
+        self.tabs.addTab(self.processing_tab, QIcon.fromTheme("system-run"), "Proc")
+        self.tabs.addTab(self.viz_controls_tab, QIcon.fromTheme("preferences-desktop"), "View")
         
-        # 设置选项卡的样式
+        # 设置选项卡的样式 - 缩小宽度以显示更多tab
         self.tabs.setStyleSheet("""
             QTabBar::tab {
-                min-width: 150px;
-                padding: 8px;
+                min-width: 50px;
+                max-width: 60px;
+                padding: 6px 4px;
+                font-size: 11px;
+            }
+            QTabBar::tab:selected {
+                font-weight: bold;
             }
         """)
+        
+        # 设置tab工具提示以显示完整名称
+        self.tabs.setTabToolTip(0, "File Details")
+        self.tabs.setTabToolTip(1, "Notes")
+        self.tabs.setTabToolTip(2, "Data Processing")
+        self.tabs.setTabToolTip(3, "Visualization Controls")
         
         # 左侧布局添加组件，调整文件列表和标签页的比例
         self.left_layout.addLayout(self.folder_layout)

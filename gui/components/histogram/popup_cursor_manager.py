@@ -8,14 +8,14 @@ Popup Cursor Manager - 弹窗式cursor管理器（修复版）
 
 from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QPushButton, 
                              QListWidget, QListWidgetItem, QLabel, QDoubleSpinBox,
-                             QMessageBox, QGroupBox, QFrame, QDialog)
+                             QMessageBox, QGroupBox, QFrame, QMainWindow)
 from PyQt6.QtCore import Qt, pyqtSignal, QTimer
 from PyQt6.QtGui import QColor
 import numpy as np
 
 
-class PopupCursorManager(QDialog):
-    """弹窗式Cursor管理器界面（修复版）"""
+class PopupCursorManager(QWidget):  # 改用QWidget替代QDialog
+    """弹窗式Cursor管理器界面（彻底修复版）"""
     
     # 定义信号
     cursor_position_changed = pyqtSignal(int, float)  # cursor_id, new_position
@@ -27,18 +27,15 @@ class PopupCursorManager(QDialog):
         self.plot_widget = None  # 关联的HistogramPlot对象
         self.selected_cursor_id = None
         
-        # 修复交互问题 - 使用简单的窗口标志
+        # 设置为工具窗口，确保可以正常交互
         self.setWindowFlags(
-            Qt.WindowType.Window |
+            Qt.WindowType.Tool |
             Qt.WindowType.WindowTitleHint |
-            Qt.WindowType.WindowCloseButtonHint
+            Qt.WindowType.WindowCloseButtonHint |
+            Qt.WindowType.WindowStaysOnTopHint
         )
-        # 设置为非模态窗口，允许正常交互
-        self.setModal(False)
-        # 确保窗口可以获得焦点和接收交互
+        # 简化属性设置，确保交互正常
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
-        # 允许窗口获得焦点并激活
-        self.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose, False)
         self.setWindowTitle("Cursor Manager")
         
         # 扩展窗口尺寸，确保完整显示
@@ -165,9 +162,9 @@ class PopupCursorManager(QDialog):
         self.cursor_list.itemClicked.connect(self.on_cursor_item_clicked)
         self.cursor_list.itemSelectionChanged.connect(self.on_selection_changed)  # 新增选择变化信号
         self.cursor_list.setMinimumHeight(200)  # 增加高度
-        self.cursor_list.setFocusPolicy(Qt.FocusPolicy.StrongFocus)  # 确保可以获得焦点
-        # 启用鼠标追踪和选择
-        self.cursor_list.setMouseTracking(True)
+        # 确保控件可以正常交互
+        self.cursor_list.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
+        self.cursor_list.setEnabled(True)
         self.cursor_list.setStyleSheet("""
             QListWidget {
                 border: 1px solid #cccccc;
@@ -225,9 +222,9 @@ class PopupCursorManager(QDialog):
         self.position_spinbox.valueChanged.connect(self.on_position_changed)
         self.position_spinbox.editingFinished.connect(self.on_position_editing_finished)  # 新增编辑完成信号
         self.position_spinbox.setEnabled(False)
-        self.position_spinbox.setFocusPolicy(Qt.FocusPolicy.StrongFocus)  # 确保可获得焦点
-        # 允许键盘输入
-        self.position_spinbox.setKeyboardTracking(True)
+        # 确保数字输入框可以正常交互
+        self.position_spinbox.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
+        self.position_spinbox.setEnabled(False)  # 初始状态为禁用
         self.position_spinbox.setStyleSheet("""
             QDoubleSpinBox {
                 border: 1px solid #cccccc;
@@ -315,8 +312,8 @@ class PopupCursorManager(QDialog):
         
         self.setLayout(layout)
         
-        # 确保窗口可以获得焦点
-        self.setFocus()
+        # 简化窗口属性设置
+        self.setWindowModality(Qt.WindowModality.NonModal)
         
     def show_popup(self):
         """显示弹窗并定位到合适位置"""
@@ -330,14 +327,19 @@ class PopupCursorManager(QDialog):
             
             self.move(x, y)
         
-        # 确保窗口可以正常显示和交互
+        # 显示窗口
         self.show()
         self.raise_()
         self.activateWindow()
-        # 强制获得焦点
-        self.setFocus()
         
-        # 启动数据实时更新 - 使用较低的频率避免干扰交互
+        # 延迟设置焦点，确保窗口完全显示后再获得焦点
+        from PyQt6.QtCore import QTimer
+        QTimer.singleShot(100, lambda: (
+            self.setFocus(),
+            self.activateWindow()
+        ))
+        
+        # 启动数据实时更新
         self.start_real_time_updates()
         
     def closeEvent(self, event):
@@ -348,14 +350,13 @@ class PopupCursorManager(QDialog):
     def focusInEvent(self, event):
         """获得焦点时的处理"""
         super().focusInEvent(event)
-        # 当窗口获得焦点时，确保可以接收键盘和鼠标事件
+        # 确保窗口可以正常接收事件
         self.activateWindow()
     
     def mousePressEvent(self, event):
         """鼠标按下事件处理"""
         super().mousePressEvent(event)
         # 确保窗口获得焦点
-        self.setFocus()
         self.activateWindow()
         
     def start_real_time_updates(self):
@@ -491,22 +492,36 @@ class PopupCursorManager(QDialog):
             self._user_interacting = False
             
     def delete_selected_cursor(self):
-        """删除当前选中的cursor"""
+        """删除当前选中的cursor（修复版）"""
         if not self.plot_widget or self.selected_cursor_id is None:
             return
         
         self._user_interacting = True  # 标记用户交互
         try:
+            # 记录删除前的cursor ID
+            deleted_id = self.selected_cursor_id
+            
+            # 执行删除操作
             success = self.plot_widget.remove_cursor(self.selected_cursor_id)
             if success:
-                self.cursor_deleted.emit(self.selected_cursor_id)
+                print(f"Deleted cursor with ID: {deleted_id}")
+                
+                # 发送删除信号
+                self.cursor_deleted.emit(deleted_id)
+                
+                # 清除当前选中状态
                 self.selected_cursor_id = None
                 self.position_spinbox.setEnabled(False)
                 self.delete_btn.setEnabled(False)
+                
+                # 重新编号cursor列表（这会重新分配连续ID）
+                self.reorder_cursor_ids()
+                
+                # 刷新显示和统计
                 self.refresh_cursor_list()
                 self.update_statistics()
-                # 重新编号cursor列表
-                self.reorder_cursor_ids()
+                
+                print(f"After deletion, remaining cursors: {len(self.plot_widget.cursors)}")
         finally:
             self._user_interacting = False
             
@@ -712,31 +727,46 @@ class PopupCursorManager(QDialog):
             self._refreshing_list = False
         
     def reorder_cursor_ids(self):
-        """重新排序cursor ID - 删除后重新编号"""
+        """重新排序cursor ID - 删除后重新编号（修复版）"""
         if not self.plot_widget or not hasattr(self.plot_widget, 'cursors'):
             return
         
-        # 获取当前所有cursor，按照位置排序
+        # 获取当前所有cursor，按照ID排序保持稳定性
         cursors = self.plot_widget.cursors
         if len(cursors) == 0:
+            if hasattr(self.plot_widget, 'cursor_counter'):
+                self.plot_widget.cursor_counter = 0
             return
             
-        # 重新分配ID，从1开始连续编号
-        for i, cursor in enumerate(cursors):
-            old_id = cursor.get('id', i)
+        # 先按照当前ID排序，保持相对顺序
+        cursors_sorted = sorted(cursors, key=lambda c: c.get('id', 0))
+        
+        # 重新分配连续的ID，从1开始
+        old_to_new_id_map = {}
+        for i, cursor in enumerate(cursors_sorted):
+            old_id = cursor.get('id')
             new_id = i + 1
+            old_to_new_id_map[old_id] = new_id
             cursor['id'] = new_id
             
             # 如果当前选中的cursor ID发生了变化，更新选中状态
             if old_id == self.selected_cursor_id:
                 self.selected_cursor_id = new_id
         
-        # 重置cursor计数器
+        # 更新cursor列表顺序
+        self.plot_widget.cursors = cursors_sorted
+        
+        # 重置cursor计数器为下一个可用ID
         if hasattr(self.plot_widget, 'cursor_counter'):
             self.plot_widget.cursor_counter = len(cursors)
         
+        # 确保所有cursor的selected状态正确
+        for cursor in self.plot_widget.cursors:
+            cursor['selected'] = (cursor['id'] == self.selected_cursor_id)
+        
         # 刷新显示
         self.refresh_cursor_list()
+        print(f"Reordered cursors: {[c['id'] for c in cursors_sorted]}")
         
     def update_statistics(self):
         """更新统计信息"""

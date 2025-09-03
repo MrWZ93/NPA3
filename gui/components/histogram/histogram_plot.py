@@ -17,6 +17,53 @@ import matplotlib.gridspec as gridspec
 from PyQt6.QtCore import pyqtSignal, QTimer, Qt
 
 
+class FitDataManager:
+    """拟合数据管理器，用于在不同的视图之间同步拟合结果"""
+    
+    def __init__(self):
+        self.gaussian_fits = []  # 存储所有拟合结果
+        self.fit_regions = []    # 存储拟合区域
+        self.data_range = None   # 数据范围（用于验证拟合是否适用）
+        self.data_hash = None    # 数据哈希值（用于检测数据变化）
+    
+    def save_fits(self, fits, regions, data_range=None, data_hash=None):
+        """保存拟合结果"""
+        self.gaussian_fits = [self._copy_fit(fit) for fit in fits]
+        self.fit_regions = [(r[0], r[1]) for r in regions if len(r) >= 2] if regions else []
+        self.data_range = data_range
+        self.data_hash = data_hash
+        print(f"Saved {len(self.gaussian_fits)} fits")
+    
+    def get_fits(self):
+        """获取拟合结果"""
+        return self.gaussian_fits, self.fit_regions
+    
+    def has_fits(self):
+        """检查是否有拟合结果"""
+        return len(self.gaussian_fits) > 0
+    
+    def clear_fits(self):
+        """清除所有拟合结果"""
+        self.gaussian_fits.clear()
+        self.fit_regions.clear()
+        self.data_range = None
+        self.data_hash = None
+    
+    def is_compatible_with_data(self, data_range, data_hash):
+        """检查拟合结果是否与当前数据兼容"""
+        if self.data_hash is None or data_hash is None:
+            return False
+        return self.data_hash == data_hash
+    
+    def _copy_fit(self, fit):
+        """复制拟合数据（不包括绘图对象）"""
+        return {
+            'popt': fit.get('popt'),
+            'x_range': fit.get('x_range'),
+            'color': fit.get('color')
+        }
+
+
 class HistogramPlot(FigureCanvas):
     """直方图可视化画布（修复版）"""
     
@@ -33,6 +80,10 @@ class HistogramPlot(FigureCanvas):
         # 保存父组件引用，这样可以访问拟合信息面板
         self.parent_dialog = parent
         print(f"HistogramPlot initialized with parent: {parent}")
+        
+        # 【新增】拟合数据管理系统
+        self.shared_fit_data = None  # 共享的拟合数据引用
+        self.fit_data_manager = FitDataManager()  # 本地拟合数据管理器
         
         # 【修复点1】添加递归调用防护机制
         self._updating_plot = False  # 防止plot更新的递归
@@ -72,6 +123,9 @@ class HistogramPlot(FigureCanvas):
         self.drag_start_y = None  # 拖拽开始的y坐标
         self.cursor_colors = ['red', 'blue', 'green', 'purple', 'orange', 'brown', 'pink', 'gray', 'olive', 'cyan']
         self.cursor_counter = 0  # cursor计数器，用于生成唯一ID
+        
+        # 【新增】初始化主视图中subplot3拟合线条跟踪
+        self._ax3_fit_lines = []  # 确保在初始化时就创建空列表
         
         # 设置焦点策略以接收键盘事件
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
@@ -672,7 +726,13 @@ class HistogramPlot(FigureCanvas):
         # 简化防护逻辑
         if self.data is None:
             return
-            
+
+            # 【新增】提前定义变量，避免作用域问题
+        highlighted_data = None
+        
+        # 确保 _ax3_fit_lines 已初始化
+        if not hasattr(self, '_ax3_fit_lines'):
+            self._ax3_fit_lines = []  
         try:
             # 验证和修正高亮区域索引
             self._validate_highlight_indices()
@@ -689,7 +749,7 @@ class HistogramPlot(FigureCanvas):
             self.ax2.set_ylabel("Amplitude", fontsize=9, labelpad=2, rotation=90)
             self.ax3.set_xlabel("Count", fontsize=9, labelpad=1)
         
-            # 减小刷度大小以节省空间
+            # 减小刻度大小以节省空间（原代码“刷度”应为“刻度”，此处修正笔误）
             self.ax2.tick_params(labelsize=8, pad=1)
             self.ax3.tick_params(labelsize=8, pad=1)
             
@@ -746,19 +806,107 @@ class HistogramPlot(FigureCanvas):
             if len(highlighted_data) > 0:
                 h_y_min, h_y_max = self._calculate_safe_ylim(highlighted_data)
                 self.ax2.set_ylim(h_y_min, h_y_max)
-                self.ax3.set_ylim(h_y_min, h_y_max)
-                
+                # 为subplot3设置y轴范围，但要考虑拟合曲线的范围
+                if hasattr(self, '_ax3_fit_lines') and self._ax3_fit_lines:
+                    # 如果有拟合线条，扩展范围以确保可见
+                    self.ax3.set_ylim(h_y_min, h_y_max)
+                else:
+                    self.ax3.set_ylim(h_y_min, h_y_max)
+                    
                 # 绘制KDE曲线
                 if self.show_kde and len(highlighted_data) > 1:
                     self.plot_kde(highlighted_data)
-                    
-            # 刷新cursor显示
-            self.refresh_cursors_after_plot_update()
-            
+                
+                # 刷新cursor显示
+                self.refresh_cursors_after_plot_update()
+
+        # 【修复1】最外层try的except必须紧跟try块，中间不插入其他代码
         except Exception as e:
-            print(f"Error in update_highlighted_plots: {e}")
+            print(f"Error in main plotting logic of update_highlighted_plots: {e}")
             import traceback
             traceback.print_exc()
+
+        # 【修复2】拟合逻辑放在最外层try-except之后，且判断highlighted_data是否有效
+        if (highlighted_data is not None and  # 确保变量已定义且有效
+            hasattr(self, 'ax3') and 
+            self.shared_fit_data is not None and 
+            self.shared_fit_data.has_fits()):
+            try:
+                # 获取拟合数据
+                fits, regions = self.shared_fit_data.get_fits()
+                
+                # 清除ax3中的旧的拟合线条（如果有）
+                if hasattr(self, '_ax3_fit_lines') and self._ax3_fit_lines:
+                    for line in self._ax3_fit_lines[:]:
+                        try:
+                            if line and line in self.ax3.lines:
+                                line.remove()
+                        except:
+                            pass  # 忽略已经被删除的线条
+                    self._ax3_fit_lines.clear()
+                else:
+                    # 确保列表存在
+                    self._ax3_fit_lines = []
+                
+                # 在ax3中绘制拟合曲线
+                for fit_data in fits:
+                    if not fit_data or 'popt' not in fit_data:
+                        continue
+                        
+                    popt = fit_data['popt']
+                    x_range = fit_data['x_range']
+                    color = fit_data['color']
+                    
+                    # 【修复】改进范围检查 - 只要有重叠就显示，不要求完全包含
+                    data_min, data_max = highlighted_data.min(), highlighted_data.max()
+                    data_range = data_max - data_min
+                    tolerance = max(0.1 * data_range, 0.001)  # 10%容差，最小0.001
+                    
+                    # 检查是否有重叠（而不是要求完全包含）
+                    has_overlap = (x_range[1] > data_min - tolerance and x_range[0] < data_max + tolerance)
+                    
+                    print(f"Fit range check: data=[{data_min:.4f}, {data_max:.4f}], fit=[{x_range[0]:.4f}, {x_range[1]:.4f}], overlap={has_overlap}")
+                    
+                    if has_overlap:
+                        # 高斯函数（建议放在函数外部定义，避免每次循环重新创建）
+                        def gaussian(x, amp, mu, sigma):
+                            return amp * np.exp(-(x - mu)**2 / (2 * sigma**2))
+                        
+                        # 创建拟合曲线数据
+                        x_fit = np.linspace(x_range[0], x_range[1], 150)
+                        y_fit = gaussian(x_fit, *popt)
+                        
+                        # 绘制曲线（注意直方图是horizontal，所以x/y对应count/amplitude）
+                        # 调细拟合曲线
+                        line, = self.ax3.plot(y_fit, x_fit, '-', linewidth=1.0, color=color, zorder=15)
+                        self._ax3_fit_lines.append(line)
+                        
+                        print(f"Applied fit {len(self._ax3_fit_lines)} to subplot3: color={color}, range={x_range}")
+                    else:
+                        print(f"Skipped fit due to no overlap: fit_range={x_range}, data_range=[{data_min:.4f}, {data_max:.4f}]")
+                        
+                # 确保轴范围能显示所有拟合曲线
+                if self._ax3_fit_lines:
+                    # 获取当前轴范围
+                    current_ylim = self.ax3.get_ylim()
+                    # 如果有拟合线条，确保范围包含所有拟合数据
+                    all_fit_ranges = [fit_data['x_range'] for fit_data in fits if fit_data and 'x_range' in fit_data]
+                    if all_fit_ranges:
+                        fit_min = min(r[0] for r in all_fit_ranges)
+                        fit_max = max(r[1] for r in all_fit_ranges)
+                        # 扩展轴范围以包含所有拟合区间
+                        new_ymin = min(current_ylim[0], fit_min)
+                        new_ymax = max(current_ylim[1], fit_max)
+                        if new_ymin != current_ylim[0] or new_ymax != current_ylim[1]:
+                            self.ax3.set_ylim(new_ymin, new_ymax)
+                            print(f"Extended ax3 y-axis range to [{new_ymin:.4f}, {new_ymax:.4f}] to show all fits")
+                        
+                print(f"Applied {len(fits)} fits to subplot3 in main view, displayed {len(self._ax3_fit_lines) if hasattr(self, '_ax3_fit_lines') else 0} lines")
+                
+            except Exception as e:
+                print(f"Error applying fits to subplot3 in main view: {e}")
+                import traceback
+                traceback.print_exc()
     
     def plot_kde(self, data):
         """绘制核密度估计曲线"""
@@ -1092,6 +1240,211 @@ class HistogramPlot(FigureCanvas):
         # 重绘
         self.draw()
         
+    def set_shared_fit_data(self, shared_fit_data):
+        """设置共享的拟合数据引用"""
+        self.shared_fit_data = shared_fit_data
+        print(f"Set shared fit data: {shared_fit_data}")
+    
+    def save_current_fits(self):
+        """保存当前的拟合结果到共享数据"""
+        if not hasattr(self, 'gaussian_fits') or not self.gaussian_fits:
+            return
+            
+        try:
+            # 计算数据哈希值
+            data_hash = self._calculate_data_hash()
+            data_range = (self.histogram_data.min(), self.histogram_data.max()) if hasattr(self, 'histogram_data') else None
+            
+            # 保存到本地管理器
+            regions = [(r[0], r[1]) for r in self.fit_regions if len(r) >= 2]
+            self.fit_data_manager.save_fits(self.gaussian_fits, regions, data_range, data_hash)
+            
+            # 保存到共享数据
+            if self.shared_fit_data is not None:
+                self.shared_fit_data.save_fits(self.gaussian_fits, regions, data_range, data_hash)
+                print(f"Saved {len(self.gaussian_fits)} fits to shared data")
+                
+        except Exception as e:
+            print(f"Error saving fits: {e}")
+            import traceback
+            traceback.print_exc()
+    
+    def immediate_sync_to_main_view(self):
+        """立即同步拟合结果到主视图的subplot3"""
+        try:
+            if (hasattr(self, 'parent_dialog') and self.parent_dialog and 
+                hasattr(self.parent_dialog, 'plot_canvas')):
+                # 获取主视图画布
+                main_canvas = self.parent_dialog.plot_canvas
+                
+                # 确保主视图的_ax3_fit_lines列表存在
+                if not hasattr(main_canvas, '_ax3_fit_lines'):
+                    main_canvas._ax3_fit_lines = []
+                
+                # 触发主视图subplot3的更新
+                if hasattr(main_canvas, 'update_highlighted_plots'):
+                    print(f"Triggering sync to main view - current fits: {len(self.gaussian_fits)}")
+                    main_canvas.update_highlighted_plots()
+                    main_canvas._throttled_draw()
+                    print(f"Immediate sync to main view subplot3 completed - lines: {len(main_canvas._ax3_fit_lines)}")
+        except Exception as e:
+            print(f"Error in immediate sync to main view: {e}")
+            import traceback
+            traceback.print_exc()
+    
+    def restore_fits_from_shared_data(self):
+        """从共享数据恢复拟合结果"""
+        if self.shared_fit_data is None or not self.shared_fit_data.has_fits():
+            return False
+            
+        try:
+            # 检查数据兼容性
+            data_hash = self._calculate_data_hash()
+            if not self.shared_fit_data.is_compatible_with_data(None, data_hash):
+                print("Shared fit data is not compatible with current data")
+                return False
+            
+            # 获取共享的拟合数据
+            fits, regions = self.shared_fit_data.get_fits()
+            
+            # 应用到当前图表
+            self.apply_fits_to_plot(fits, regions)
+            
+            print(f"Restored {len(fits)} fits from shared data")
+            return True
+            
+        except Exception as e:
+            print(f"Error restoring fits from shared data: {e}")
+            import traceback
+            traceback.print_exc()
+            return False
+    
+    def apply_fits_to_plot(self, fits, regions):
+        """将拟合结果应用到当前图表"""
+        try:
+            # 清除现有的拟合
+            self._clear_existing_fits()
+            
+            # 初始化拟合数据结构
+            if not hasattr(self, 'gaussian_fits'):
+                self.gaussian_fits = []
+            if not hasattr(self, 'fit_regions'):
+                self.fit_regions = []
+                
+            self.gaussian_fits.clear()
+            self.fit_regions.clear()
+            
+            # 应用每个拟合
+            for i, fit_data in enumerate(fits):
+                if not fit_data or 'popt' not in fit_data:
+                    continue
+                    
+                popt = fit_data['popt']
+                x_range = fit_data['x_range']
+                color = fit_data['color']
+                
+                # 绘制拟合曲线
+                self._draw_fit_curve(popt, x_range, color, i + 1)
+                
+            # 更新拟合信息面板
+            if hasattr(self, 'parent_dialog') and self.parent_dialog and hasattr(self.parent_dialog, 'fit_info_panel'):
+                self.parent_dialog.fit_info_panel.clear_all_fits()
+                for i, fit_data in enumerate(fits):
+                    if fit_data and 'popt' in fit_data:
+                        amp, mu, sigma = fit_data['popt']
+                        self.parent_dialog.fit_info_panel.add_fit(
+                            i + 1, amp, mu, sigma, fit_data['x_range'], fit_data['color']
+                        )
+            
+            # 更新拟合信息字符串
+            if hasattr(self, 'update_fit_info_string'):
+                self.update_fit_info_string()
+                
+        except Exception as e:
+            print(f"Error applying fits to plot: {e}")
+            import traceback
+            traceback.print_exc()
+    
+    def _draw_fit_curve(self, popt, x_range, color, fit_num):
+        """绘制单个拟合曲线"""
+        try:
+            if not hasattr(self, 'ax'):
+                return
+                
+            # 高斯函数
+            def gaussian(x, amp, mu, sigma):
+                return amp * np.exp(-(x - mu)**2 / (2 * sigma**2))
+            
+            # 创建拟合曲线数据
+            x_fit = np.linspace(x_range[0], x_range[1], 150)
+            y_fit = gaussian(x_fit, *popt)
+            
+            # 绘制曲线 - 调细拟合曲线
+            line, = self.ax.plot(x_fit, y_fit, '-', linewidth=1.0, color=color, zorder=15)
+            
+            # 创建文本标签
+            amp, mu, sigma = popt
+            text = f"G{fit_num}: μ={mu:.3f}, σ={sigma:.3f}"
+            text_obj = self.ax.text(mu, amp*1.05, text, ha='center', va='bottom', fontsize=9,
+                bbox=dict(facecolor='white', alpha=0.8, edgecolor=color, boxstyle='round'),
+                color=color, zorder=20)
+            
+            # 检查标签可见性
+            if hasattr(self, 'labels_visible'):
+                text_obj.set_visible(self.labels_visible)
+            
+            # 添加到拟合列表
+            fit_data = {
+                'popt': popt,
+                'x_range': x_range,
+                'line': line,
+                'text': text_obj,
+                'color': color
+            }
+            self.gaussian_fits.append(fit_data)
+            
+            # 添加区域高亮（如果需要）
+            if hasattr(self, 'fit_regions'):
+                region = self.ax.axvspan(x_range[0], x_range[1], alpha=0.08, color='green', zorder=0)
+                self.fit_regions.append((x_range[0], x_range[1], region))
+                
+        except Exception as e:
+            print(f"Error drawing fit curve: {e}")
+            import traceback
+            traceback.print_exc()
+    
+    def _clear_existing_fits(self):
+        """清除现有的拟合绘图对象"""
+        try:
+            if hasattr(self, 'gaussian_fits'):
+                for fit in self.gaussian_fits:
+                    if 'line' in fit and fit['line'] and hasattr(self, 'ax') and fit['line'] in self.ax.lines:
+                        fit['line'].remove()
+                    if 'text' in fit and fit['text']:
+                        fit['text'].remove()
+            
+            if hasattr(self, 'fit_regions'):
+                for region_data in self.fit_regions:
+                    if len(region_data) >= 3 and region_data[2] and hasattr(self, 'ax') and region_data[2] in self.ax.patches:
+                        region_data[2].remove()
+                        
+        except Exception as e:
+            print(f"Error clearing existing fits: {e}")
+            import traceback
+            traceback.print_exc()
+    
+    def _calculate_data_hash(self):
+        """计算数据哈希值用于检测数据变化"""
+        try:
+            if hasattr(self, 'histogram_data') and self.histogram_data is not None:
+                # 使用数据的简单统计信息作为哈希
+                data = self.histogram_data
+                stats_str = f"{len(data)}_{data.min():.6f}_{data.max():.6f}_{data.mean():.6f}_{data.std():.6f}"
+                return hash(stats_str)
+            return None
+        except:
+            return None
+        
     def on_rect_select(self, eclick, erelease):
         """处理矩形器的框选区域"""
         try:
@@ -1176,14 +1529,14 @@ class HistogramPlot(FigureCanvas):
             try:
                 popt, _ = curve_fit(gaussian, x_data, y_data, p0=p0, bounds=bounds, maxfev=2000)
                 
-                # 计算指定高斯组件的颜色
-                colors = ['red', 'blue', 'purple', 'orange', 'green', 'magenta', 'cyan', 'brown', 'olive', 'teal']
-                color_idx = len(self.gaussian_fits) % len(colors)
-                fit_color = colors[color_idx]
+                # 计算指定高斯组件的颜色 - 与cursor颜色保持一致
+                fit_colors = ['red', 'blue', 'purple', 'orange', 'green', 'magenta', 'cyan', 'brown', 'olive', 'teal']
+                color_idx = len(self.gaussian_fits) % len(fit_colors)
+                fit_color = fit_colors[color_idx]
                 
-                # 将拟合曲线绘到图上，使用颜色循环
+                # 将拟合曲线绘到图上，使用颜色循环 - 调细拟合曲线
                 y_fit = gaussian(x_fit, *popt)
-                line, = self.ax.plot(x_fit, y_fit, '-', linewidth=1.5, color=fit_color, zorder=15)
+                line, = self.ax.plot(x_fit, y_fit, '-', linewidth=1.0, color=fit_color, zorder=15)
                 
                 # 创建文本标签显示拟合参数
                 amp, mu, sigma = popt
@@ -1221,8 +1574,13 @@ class HistogramPlot(FigureCanvas):
                 # 全部拟合信息
                 self.update_fit_info_string()
                 
-                # 重绘
+                # 重新绘制
                 self.draw()
+                
+                # 【新增】保存拟合结果到共享数据并立即同步到主视图
+                self.save_current_fits()
+                # 立即触发主视图subplot3的更新
+                self.immediate_sync_to_main_view()
                 
             except RuntimeError as e:
                 print(f"Error fitting Gaussian: {e}")
@@ -1266,6 +1624,10 @@ class HistogramPlot(FigureCanvas):
     def clear_fits(self):
         """清除所有高斯拟合"""
         try:
+            # 【新增】先保存清空状态到共享数据
+            if self.shared_fit_data is not None:
+                self.shared_fit_data.clear_fits()
+            
             if hasattr(self, 'gaussian_fits'):
                 # 删除所有拟合曲线和文本
                 for fit in self.gaussian_fits:
@@ -1345,8 +1707,14 @@ class HistogramPlot(FigureCanvas):
             if self.highlighted_fit_index >= len(self.gaussian_fits):
                 self.highlighted_fit_index = -1
             
+            # 【新增】保存更新后的拟合结果到共享数据
+            self.save_current_fits()
+            
             # 重新绘制
             self.draw()
+            
+            return True
+            
         except Exception as e:
             print(f"Error deleting specific fit: {e}")
             import traceback
@@ -1366,9 +1734,11 @@ class HistogramPlot(FigureCanvas):
                 else:
                     y_position = 0  # 默认位置
             
-            # 选择颜色
+            # 选择颜色 - 与拟合曲线颜色保持一致
             if color is None:
-                color = self.cursor_colors[len(self.cursors) % len(self.cursor_colors)]
+                # 使用与拟合曲线一致的颜色循环
+                fit_colors = ['red', 'blue', 'purple', 'orange', 'green', 'magenta', 'cyan', 'brown', 'olive', 'teal']
+                color = fit_colors[len(self.cursors) % len(fit_colors)]
             
             # 创建唯一ID
             cursor_id = self.cursor_counter
@@ -1413,7 +1783,7 @@ class HistogramPlot(FigureCanvas):
             return None
     
     def remove_cursor(self, cursor_id):
-        """删除指定ID的cursor"""
+        """删除指定ID的cursor（修复版）"""
         try:
             # 找到对应的cursor
             cursor_to_remove = None
@@ -1429,21 +1799,31 @@ class HistogramPlot(FigureCanvas):
                 print(f"Cursor with ID {cursor_id} not found")
                 return False
             
+            print(f"Removing cursor with ID {cursor_id} at index {cursor_index}")
+            
             # 从图中移除线条
-            if cursor_to_remove['line_ax2'] and cursor_to_remove['line_ax2'] in self.ax2.lines:
+            if cursor_to_remove.get('line_ax2') and cursor_to_remove['line_ax2'] in self.ax2.lines:
                 cursor_to_remove['line_ax2'].remove()
-            if cursor_to_remove['line_ax3'] and cursor_to_remove['line_ax3'] in self.ax3.lines:
+            if cursor_to_remove.get('line_ax3') and cursor_to_remove['line_ax3'] in self.ax3.lines:
                 cursor_to_remove['line_ax3'].remove()
+            # 如果在histogram模式下，也要移除相应的线
+            if cursor_to_remove.get('histogram_line'):
+                try:
+                    cursor_to_remove['histogram_line'].remove()
+                except:
+                    pass
+            
+            # 清除选中状态（在移除之前）
+            if self.selected_cursor == cursor_to_remove:
+                self.selected_cursor = None
             
             # 从列表中移除
             self.cursors.pop(cursor_index)
             
-            # 重新编号所有cursor
-            self._renumber_cursors()
+            # 不在这里调用重新编号，让PopupCursorManager来处理
+            # 这样可以确保正确的顺序和状态管理
             
-            # 清除选中状态
-            if self.selected_cursor == cursor_to_remove:
-                self.selected_cursor = None
+            print(f"Successfully removed cursor. Remaining cursors: {[c['id'] for c in self.cursors]}")
             
             # 使用限制频率的重绘
             self._throttled_draw()
@@ -1457,20 +1837,33 @@ class HistogramPlot(FigureCanvas):
             return False
     
     def _renumber_cursors(self):
-        """重新编号所有cursor从1开始 - 优化版"""
+        """重新编号所有cursor从1开始 - 修复版"""
         try:
-            # 按照Y位置排序cursor，保持一致的显示顺序
-            sorted_cursors = sorted(self.cursors, key=lambda c: c['y_position'])
+            # 不按位置排序，而是按当前ID排序以保持相对顺序
+            if not self.cursors:
+                self.cursor_counter = 0
+                return
+                
+            # 按当前ID排序保持相对顺序
+            sorted_cursors = sorted(self.cursors, key=lambda c: c.get('id', 0))
             
-            # 重新编号从1开始
+            # 重新分配连续的ID，从1开始
             for i, cursor in enumerate(sorted_cursors):
-                cursor['id'] = i + 1
+                old_id = cursor.get('id')
+                new_id = i + 1
+                cursor['id'] = new_id
+                
+                # 如果选中的cursor的ID变了，更新选中状态
+                if self.selected_cursor and self.selected_cursor.get('id') == old_id:
+                    self.selected_cursor['id'] = new_id
             
-            # 更新cursor列表为排序后的列表
+            # 更新cursor列表
             self.cursors = sorted_cursors
             
-            # 重置cursor计数器
+            # 设置下一个可用的cursor ID
             self.cursor_counter = len(self.cursors)
+            
+            print(f"Renumbered cursors to: {[c['id'] for c in self.cursors]}")
             
         except Exception as e:
             print(f"Error renumbering cursors: {e}")
@@ -1955,6 +2348,9 @@ class HistogramPlot(FigureCanvas):
                 if self.highlighted_fit_index >= len(self.gaussian_fits):
                     self.highlighted_fit_index = -1
                 
+                # 【新增】保存更新后的拟合结果到共享数据
+                self.save_current_fits()
+                
                 # 重新绘制
                 self.draw()
             
@@ -2026,6 +2422,9 @@ class HistogramPlot(FigureCanvas):
                     # 更新拟合信息面板(如果存在)
                     if hasattr(self, 'parent_dialog') and self.parent_dialog and hasattr(self.parent_dialog, 'fit_info_panel'):
                         self.parent_dialog.fit_info_panel.update_fit(fit_num, amp, mu, sigma, x_range, color)
+                    
+                    # 【新增】保存更新后的拟合结果到共享数据
+                    self.save_current_fits()
                     
                     # 重新绘制
                     self.draw()

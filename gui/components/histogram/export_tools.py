@@ -61,15 +61,14 @@ class IntegratedDataExporter:
         self.settings_manager = SettingsManager()
         
     def export_comprehensive_data(self):
-        """综合导出所有数据"""
+        """综合导出所有数据 - 改进版，创建文件夹并包含原文件路径"""
         try:
             # 获取上次保存的路径
             settings = self.settings_manager.load_settings("histogram_export")
             last_export_dir = settings.get("last_export_directory", "")
             
-            # 如果没有保存的路径，使用程序所在路径
+            # 如果没有保存的路径，使用原文件所在路径
             if not last_export_dir or not os.path.exists(last_export_dir):
-                # 获取程序所在路径
                 if hasattr(self.dialog.data_manager, 'file_path') and self.dialog.data_manager.file_path:
                     last_export_dir = os.path.dirname(self.dialog.data_manager.file_path)
                 else:
@@ -79,38 +78,59 @@ class IntegratedDataExporter:
             current_time = datetime.now().strftime("%Y%m%d_%H%M%S")
             if hasattr(self.dialog.data_manager, 'file_path') and self.dialog.data_manager.file_path:
                 base_name = os.path.splitext(os.path.basename(self.dialog.data_manager.file_path))[0]
-                default_filename = f"{base_name}_export_{current_time}"
+                default_foldername = f"{base_name}_export_{current_time}"
             else:
-                default_filename = f"histogram_export_{current_time}"
+                default_foldername = f"histogram_export_{current_time}"
             
-            # 在上次保存的目录中设置默认文件名
-            default_path = os.path.join(last_export_dir, default_filename)
+            # 在上次保存的目录中设置默认文件夹名
+            default_path = os.path.join(last_export_dir, default_foldername)
             
-            # 显示文件保存对话框
-            file_path, _ = QFileDialog.getSaveFileName(
+            # 显示文件保存对话框，让用户选择路径和文件夹名
+            folder_path, _ = QFileDialog.getSaveFileName(
                 self.dialog,
-                "Export Comprehensive Data",
+                "Export Comprehensive Data - Choose folder name and location",
                 default_path,
-                "All Files (*)"
+                "Folder (*.folder);;All Files (*)"
             )
             
-            if not file_path:
+            if not folder_path:
                 return False, "Export cancelled by user"
             
+            # 移除可能的扩展名，获取纯文件夹名
+            folder_path = os.path.splitext(folder_path)[0]
+            
             # 保存新选择的目录
-            new_export_dir = os.path.dirname(file_path)
+            new_export_dir = os.path.dirname(folder_path)
             settings["last_export_directory"] = new_export_dir
             self.settings_manager.save_settings("histogram_export", settings)
             
-            # 移除扩展名，使用基础文件名
-            base_path = os.path.splitext(file_path)[0]
+            # 创建导出文件夹
+            try:
+                os.makedirs(folder_path, exist_ok=True)
+                print(f"Created export folder: {folder_path}")
+            except Exception as e:
+                return False, f"Failed to create export folder: {str(e)}"
+            
+            # 获取文件夹名作为基础名称
+            folder_name = os.path.basename(folder_path)
             
             # 显示进度对话框
-            progress = QProgressDialog("Exporting data...", "Cancel", 0, 5, self.dialog)
+            progress = QProgressDialog("Exporting data...", "Cancel", 0, 6, self.dialog)
             progress.setWindowModality(Qt.WindowModality.WindowModal)
             progress.show()
             
             exported_files = []
+            
+            # 0. 导出文件信息和元数据
+            progress.setLabelText("Creating metadata...")
+            progress.setValue(0)
+            if progress.wasCanceled():
+                return False, "Export cancelled"
+                
+            metadata_file = os.path.join(folder_path, f"{folder_name}_metadata.txt")
+            success = self._export_metadata(metadata_file)
+            if success:
+                exported_files.append(os.path.basename(metadata_file))
             
             # 1. 导出直方图统计数据
             progress.setLabelText("Collecting histogram statistics...")
@@ -118,10 +138,10 @@ class IntegratedDataExporter:
             if progress.wasCanceled():
                 return False, "Export cancelled"
                 
-            hist_stats_file = f"{base_path}_histogram_stats.csv"
+            hist_stats_file = os.path.join(folder_path, f"{folder_name}_histogram_stats.csv")
             success = self._export_histogram_stats(hist_stats_file)
             if success:
-                exported_files.append(hist_stats_file)
+                exported_files.append(os.path.basename(hist_stats_file))
             
             # 2. 导出拟合数据
             progress.setLabelText("Collecting fit data...")
@@ -129,10 +149,10 @@ class IntegratedDataExporter:
             if progress.wasCanceled():
                 return False, "Export cancelled"
                 
-            fits_file = f"{base_path}_fits.csv"
+            fits_file = os.path.join(folder_path, f"{folder_name}_fits.csv")
             success = self._export_fit_data(fits_file)
             if success:
-                exported_files.append(fits_file)
+                exported_files.append(os.path.basename(fits_file))
             
             # 3. 导出原始数据
             progress.setLabelText("Collecting raw data...")
@@ -140,10 +160,10 @@ class IntegratedDataExporter:
             if progress.wasCanceled():
                 return False, "Export cancelled"
                 
-            raw_data_file = f"{base_path}_raw_data.csv"
+            raw_data_file = os.path.join(folder_path, f"{folder_name}_raw_data.csv")
             success = self._export_raw_data(raw_data_file)
             if success:
-                exported_files.append(raw_data_file)
+                exported_files.append(os.path.basename(raw_data_file))
             
             # 4. 导出主视图图像
             progress.setLabelText("Exporting main view image...")
@@ -151,10 +171,10 @@ class IntegratedDataExporter:
             if progress.wasCanceled():
                 return False, "Export cancelled"
                 
-            main_image_file = f"{base_path}_main_view.png"
+            main_image_file = os.path.join(folder_path, f"{folder_name}_main_view.png")
             success = self._export_main_view_image(main_image_file)
             if success:
-                exported_files.append(main_image_file)
+                exported_files.append(os.path.basename(main_image_file))
             
             # 5. 导出直方图视图图像
             progress.setLabelText("Exporting histogram view image...")
@@ -162,16 +182,16 @@ class IntegratedDataExporter:
             if progress.wasCanceled():
                 return False, "Export cancelled"
                 
-            hist_image_file = f"{base_path}_histogram_view.png"
+            hist_image_file = os.path.join(folder_path, f"{folder_name}_histogram_view.png")
             success = self._export_histogram_view_image(hist_image_file)
             if success:
-                exported_files.append(hist_image_file)
+                exported_files.append(os.path.basename(hist_image_file))
             
             progress.close()
             
             if exported_files:
-                file_list = "\n".join([os.path.basename(f) for f in exported_files])
-                return True, f"Successfully exported {len(exported_files)} files:\n{file_list}"
+                file_list = "\n".join([f"  - {f}" for f in exported_files])
+                return True, f"Successfully exported {len(exported_files)} files to folder:\n{folder_path}\n\nFiles:\n{file_list}"
             else:
                 return False, "No data was exported"
                 
@@ -180,8 +200,61 @@ class IntegratedDataExporter:
                 progress.close()
             return False, f"Export error: {str(e)}"
     
+    def _export_metadata(self, file_path):
+        """导出文件元数据和原始路径信息"""
+        try:
+            with open(file_path, 'w', encoding='utf-8') as f:
+                f.write("# Histogram Export Metadata\n")
+                f.write(f"# Export Date: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
+                f.write("#\n")
+                
+                # 原文件信息
+                f.write("# Original File Information:\n")
+                if hasattr(self.dialog.data_manager, 'file_path') and self.dialog.data_manager.file_path:
+                    f.write(f"# Source File Path: {self.dialog.data_manager.file_path}\n")
+                    f.write(f"# Source File Name: {os.path.basename(self.dialog.data_manager.file_path)}\n")
+                    
+                    # 检查文件是否存在并获取信息
+                    if os.path.exists(self.dialog.data_manager.file_path):
+                        stat = os.stat(self.dialog.data_manager.file_path)
+                        f.write(f"# File Size: {stat.st_size} bytes\n")
+                        f.write(f"# File Modified: {datetime.fromtimestamp(stat.st_mtime).strftime('%Y-%m-%d %H:%M:%S')}\n")
+                else:
+                    f.write("# Source File Path: Not available\n")
+                
+                f.write("#\n")
+                
+                # 分析参数
+                f.write("# Analysis Parameters:\n")
+                if hasattr(self.dialog.data_manager, 'selected_channel'):
+                    f.write(f"# Selected Channel: {self.dialog.data_manager.selected_channel}\n")
+                    f.write(f"# Sampling Rate: {self.dialog.data_manager.sampling_rate}\n")
+                
+                if hasattr(self.dialog.plot_canvas, 'data'):
+                    f.write(f"# Highlight Region Start: {self.dialog.plot_canvas.highlight_min}\n")
+                    f.write(f"# Highlight Region End: {self.dialog.plot_canvas.highlight_max}\n")
+                    f.write(f"# Data Inverted: {self.dialog.plot_canvas.invert_data}\n")
+                
+                if hasattr(self.dialog.histogram_control, 'get_bins'):
+                    f.write(f"# Histogram Bins: {self.dialog.histogram_control.get_bins()}\n")
+                    f.write(f"# Log X Scale: {self.dialog.histogram_control.log_x_check.isChecked()}\n")
+                    f.write(f"# Log Y Scale: {self.dialog.histogram_control.log_y_check.isChecked()}\n")
+                    f.write(f"# Show KDE: {self.dialog.histogram_control.kde_check.isChecked()}\n")
+                
+                f.write("#\n")
+                f.write("# Available Channels:\n")
+                channels = self.dialog.data_manager.get_channels()
+                for i, ch in enumerate(channels, 1):
+                    f.write(f"# Channel {i}: {ch}\n")
+                    
+            return True
+            
+        except Exception as e:
+            print(f"Error exporting metadata: {e}")
+            return False
+    
     def _export_histogram_stats(self, file_path):
-        """导出直方图统计数据"""
+        """导出直方图统计数据（包含原文件信息）"""
         try:
             # 检查是否在直方图标签页且有数据
             if (self.dialog.tab_widget.currentIndex() == 1 and 
@@ -218,7 +291,16 @@ class IntegratedDataExporter:
             }
             
             # 写入CSV文件
-            with open(file_path, 'w', newline='') as csvfile:
+            with open(file_path, 'w', newline='', encoding='utf-8') as csvfile:
+                # 写入文件头信息
+                csvfile.write(f"# Histogram Statistics Export\n")
+                csvfile.write(f"# Export Date: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
+                if hasattr(self.dialog.data_manager, 'file_path') and self.dialog.data_manager.file_path:
+                    csvfile.write(f"# Source File: {self.dialog.data_manager.file_path}\n")
+                if hasattr(self.dialog.data_manager, 'selected_channel'):
+                    csvfile.write(f"# Channel: {self.dialog.data_manager.selected_channel}\n")
+                csvfile.write("#\n")
+                
                 # 写入统计信息
                 csvfile.write("# Histogram Statistics\n")
                 for key, value in stats.items():
@@ -243,38 +325,44 @@ class IntegratedDataExporter:
             return False
     
     def _export_fit_data(self, file_path):
-        """导出拟合数据"""
+        """导出拟合数据（包含原文件信息）"""
         try:
             if not hasattr(self.dialog, 'fit_info_panel'):
                 return False
                 
             fit_list = self.dialog.fit_info_panel.fit_list
-            if fit_list.count() == 0:
-                # 创建空的拟合数据文件
-                with open(file_path, 'w', newline='') as csvfile:
-                    csvfile.write("# No fit data available\n")
-                    writer = csv.writer(csvfile)
-                    writer.writerow(["fit_index", "amplitude", "mu", "sigma", "fwhm", "x_range_min", "x_range_max"])
-                return True
             
-            with open(file_path, 'w', newline='') as csvfile:
-                csvfile.write("# Gaussian Fit Data\n")
+            with open(file_path, 'w', newline='', encoding='utf-8') as csvfile:
+                # 写入文件头信息
+                csvfile.write(f"# Gaussian Fit Data Export\n")
+                csvfile.write(f"# Export Date: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
+                if hasattr(self.dialog.data_manager, 'file_path') and self.dialog.data_manager.file_path:
+                    csvfile.write(f"# Source File: {self.dialog.data_manager.file_path}\n")
+                if hasattr(self.dialog.data_manager, 'selected_channel'):
+                    csvfile.write(f"# Channel: {self.dialog.data_manager.selected_channel}\n")
+                csvfile.write(f"# Number of Fits: {fit_list.count()}\n")
+                csvfile.write("#\n")
+                
                 writer = csv.writer(csvfile)
                 writer.writerow(["fit_index", "amplitude", "mu", "sigma", "fwhm", "x_range_min", "x_range_max"])
                 
-                for i in range(fit_list.count()):
-                    item = fit_list.item(i)
-                    data = item.data(Qt.ItemDataRole.UserRole)
-                    
-                    writer.writerow([
-                        data['fit_index'],
-                        data['amp'],
-                        data['mu'],
-                        data['sigma'],
-                        data['fwhm'],
-                        data['x_range'][0],
-                        data['x_range'][1]
-                    ])
+                if fit_list.count() == 0:
+                    # 如果没有拟合数据，只写入头信息
+                    csvfile.write("# No fit data available\n")
+                else:
+                    for i in range(fit_list.count()):
+                        item = fit_list.item(i)
+                        data = item.data(Qt.ItemDataRole.UserRole)
+                        
+                        writer.writerow([
+                            data['fit_index'],
+                            data['amp'],
+                            data['mu'],
+                            data['sigma'],
+                            data['fwhm'],
+                            data['x_range'][0],
+                            data['x_range'][1]
+                        ])
             
             return True
             
@@ -283,7 +371,7 @@ class IntegratedDataExporter:
             return False
     
     def _export_raw_data(self, file_path):
-        """导出原始数据"""
+        """导出原始数据（包含原文件信息）"""
         try:
             # 获取当前高亮区域的原始数据
             if not hasattr(self.dialog.plot_canvas, 'data'):
@@ -293,27 +381,36 @@ class IntegratedDataExporter:
             highlight_max = self.dialog.plot_canvas.highlight_max
             current_channel = self.dialog.data_manager.selected_channel
             
-            with open(file_path, 'w', newline='') as csvfile:
+            with open(file_path, 'w', newline='', encoding='utf-8') as csvfile:
+                # 写入文件头信息
                 csvfile.write(f"# Raw Data Export - Highlighted Region\n")
-                csvfile.write(f"# Channel: {current_channel}\n")
-                csvfile.write(f"# Time range: {highlight_min} - {highlight_max}\n")
-                csvfile.write(f"# Sampling rate: {self.dialog.data_manager.sampling_rate}\n")
+                csvfile.write(f"# Export Date: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
+                if hasattr(self.dialog.data_manager, 'file_path') and self.dialog.data_manager.file_path:
+                    csvfile.write(f"# Source File: {self.dialog.data_manager.file_path}\n")
+                csvfile.write(f"# Selected Channel: {current_channel}\n")
+                csvfile.write(f"# Time range (samples): {highlight_min} - {highlight_max}\n")
+                csvfile.write(f"# Sampling rate: {self.dialog.data_manager.sampling_rate} Hz\n")
+                csvfile.write(f"# Time range (seconds): {highlight_min/self.dialog.data_manager.sampling_rate:.6f} - {highlight_max/self.dialog.data_manager.sampling_rate:.6f}\n")
+                csvfile.write(f"# Data points: {highlight_max - highlight_min}\n")
+                csvfile.write(f"# Data inverted: {self.dialog.plot_canvas.invert_data}\n")
                 csvfile.write("#\n")
                 
                 writer = csv.writer(csvfile)
                 
                 # 获取所有通道数据
                 channels = self.dialog.data_manager.get_channels()
-                headers = ["time_index"] + [f"channel_{ch}" for ch in channels]
+                headers = ["sample_index", "time_seconds"] + [f"channel_{ch}" for ch in channels]
                 writer.writerow(headers)
                 
                 # 写入数据
                 for i in range(highlight_min, highlight_max):
-                    row = [i]
+                    time_seconds = i / self.dialog.data_manager.sampling_rate
+                    row = [i, time_seconds]
                     for ch in channels:
                         ch_data = self.dialog.data_manager.get_channel_data(ch)
                         if ch_data is not None and i < len(ch_data):
                             value = ch_data[i]
+                            # 只对选中的通道应用数据取反
                             if ch == current_channel and self.dialog.plot_canvas.invert_data:
                                 value = -value
                             row.append(value)

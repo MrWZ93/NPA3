@@ -18,7 +18,7 @@ from PyQt6.QtGui import QIcon
 from matplotlib.backends.backend_qtagg import NavigationToolbar2QT as NavigationToolbar
 
 # 导入自定义模块
-from .histogram_plot import HistogramPlot
+from .histogram_plot import HistogramPlot, FitDataManager
 from .data_manager import HistogramDataManager
 from .controls import HistogramControlPanel, FileChannelControl
 from .export_tools import ExportToolsPanel, IntegratedDataExporter, ImageClipboardManager, HistogramExporter
@@ -36,6 +36,12 @@ class HistogramDialog(QDialog):
         
         # 初始化数据管理器
         self.data_manager = HistogramDataManager(self)
+        
+        # 【新增】初始化共享的拟合数据管理器
+        self.shared_fit_data = FitDataManager()
+        
+        # 拟合曲线显示状态
+        self.fit_curves_visible = True
         
         # 初始化导出器
         self.exporter = HistogramExporter(self)
@@ -82,19 +88,21 @@ class HistogramDialog(QDialog):
         
         # 创建主视图绘图区
         self.plot_canvas = HistogramPlot(self, width=8, height=6, dpi=100)
+        # 【新增】设置共享拟合数据
+        self.plot_canvas.set_shared_fit_data(self.shared_fit_data)
+        
         self.plot_toolbar = NavigationToolbar(self.plot_canvas, self)
         
         # 将绘图区添加到主视图标签页
         main_tab_layout.addWidget(self.plot_toolbar)
         main_tab_layout.addWidget(self.plot_canvas)
         
-        # 在主视图右上角添加cursor manager滑出按钮
-        cursor_btn_layout = QHBoxLayout()
-        cursor_btn_layout.addStretch()  # 推到右边
+        # 在主视图右上角添加cursor manager和拟合曲线控制按钮
+        control_btn_layout = QHBoxLayout()
+        control_btn_layout.addStretch()  # 推到右边
         
-        self.cursor_toggle_btn = QPushButton("Cursors")
-        self.cursor_toggle_btn.setFixedSize(75, 28)
-        self.cursor_toggle_btn.setStyleSheet("""
+        # 统一的按钮样式
+        button_style = """
             QPushButton {
                 background-color: #f5f5f5;
                 border: 1px solid #d0d0d0;
@@ -111,11 +119,31 @@ class HistogramDialog(QDialog):
                 background-color: #d4d4d4;
                 border-color: #888888;
             }
-        """)
+            QPushButton:checked {
+                background-color: #d4d4d4;
+                border-color: #888888;
+                color: #1976d2;
+            }
+        """
+        
+        # 拟合曲线显示控制按钮
+        self.fit_display_toggle_btn = QPushButton("Fits")
+        self.fit_display_toggle_btn.setFixedSize(65, 28)
+        self.fit_display_toggle_btn.setCheckable(True)
+        self.fit_display_toggle_btn.setChecked(True)  # 默认显示拟合曲线
+        self.fit_display_toggle_btn.setStyleSheet(button_style)
+        self.fit_display_toggle_btn.clicked.connect(self.toggle_fit_display)
+        
+        # Cursor manager按钮
+        self.cursor_toggle_btn = QPushButton("Cursors")
+        self.cursor_toggle_btn.setFixedSize(75, 28)
+        self.cursor_toggle_btn.setStyleSheet(button_style)
         self.cursor_toggle_btn.clicked.connect(self.toggle_cursor_manager)
         
-        cursor_btn_layout.addWidget(self.cursor_toggle_btn)
-        main_tab_layout.insertLayout(0, cursor_btn_layout)  # 插入到顶部
+        # 添加按钮到布局
+        control_btn_layout.addWidget(self.fit_display_toggle_btn)
+        control_btn_layout.addWidget(self.cursor_toggle_btn)
+        main_tab_layout.insertLayout(0, control_btn_layout)  # 插入到顶部
         
         # Subplot3直方图标签页
         self.subplot3_tab = QWidget()
@@ -132,6 +160,9 @@ class HistogramDialog(QDialog):
         
         # 创建 subplot3 直方图绘图区
         self.subplot3_canvas = HistogramPlot(self, width=8, height=6, dpi=100)
+        # 【新增】设置共享拟合数据
+        self.subplot3_canvas.set_shared_fit_data(self.shared_fit_data)
+        
         self.subplot3_toolbar = NavigationToolbar(self.subplot3_canvas, self)
         
         # 将绘图区添加到直方图容器
@@ -335,8 +366,8 @@ class HistogramDialog(QDialog):
             traceback.print_exc()
     
     def update_subplot3_histogram(self):
-        """更新subplot3直方图 - 添加递归防护"""
-        # 【修复点3】防止递归更新
+        """更新subplot3直方图 - 支持拟合同步"""
+        # 防止递归更新
         if (not hasattr(self.plot_canvas, 'data') or self.plot_canvas.data is None or 
             getattr(self, '_updating_subplot3', False)):
             return
@@ -371,6 +402,16 @@ class HistogramDialog(QDialog):
             # 设置subplot3_canvas的parent_dialog父组件为自己，这样可以访问fit_info_panel
             self.subplot3_canvas.parent_dialog = self
             print(f"Setting parent_dialog for subplot3_canvas: {self}")
+            
+            # 【新增】尝试从共享数据恢复拟合结果
+            if self.shared_fit_data.has_fits():
+                print("Attempting to restore fits from shared data to subplot3")
+                if self.subplot3_canvas.restore_fits_from_shared_data():
+                    print("Successfully restored fits to subplot3")
+                else:
+                    print("Failed to restore fits - data may have changed")
+                    # 数据变化了，清除共享拟合数据
+                    self.shared_fit_data.clear_fits()
             
             # 设置cursor manager与subplot3 canvas的关联（如果是在Histogram标签页）
             if self.tab_widget.currentIndex() == 1:  # Histogram标签页
@@ -491,12 +532,20 @@ class HistogramDialog(QDialog):
     def on_highlight_size_changed(self, size_percent):
         """处理高亮区域大小变化"""
         self.plot_canvas.update_highlight_size(size_percent)
+        # 【新增】清除拟合数据（数据区域变化）
+        if self.shared_fit_data.has_fits():
+            print("Clearing shared fit data due to highlight size change")
+            self.shared_fit_data.clear_fits()
         # 更新subplot3直方图
         self.update_subplot3_histogram()
     
     def on_highlight_position_changed(self, position_percent):
         """处理高亮区域位置变化"""
         self.plot_canvas.move_highlight(position_percent)
+        # 【新增】清除拟合数据（数据区域变化）
+        if self.shared_fit_data.has_fits():
+            print("Clearing shared fit data due to highlight position change")
+            self.shared_fit_data.clear_fits()
         # 更新subplot3直方图
         self.update_subplot3_histogram()
     
@@ -537,8 +586,8 @@ class HistogramDialog(QDialog):
         self.status_bar.showMessage(f"Data inversion: {'enabled' if enabled else 'disabled'}")
     
     def on_tab_changed(self, index):
-        """处理标签页切换 - 添加防护机制"""
-        # 【修复点4】防止在标签切换时产生递归调用
+        """处理标签页切换 - 支持拟合同步"""
+        # 防止在标签切换时产生递归调用
         if getattr(self, '_changing_tab', False):
             return
             
@@ -548,10 +597,27 @@ class HistogramDialog(QDialog):
             if index == 1:  # 切换到直方图标签页
                 # 确保subplot3直方图是最新的
                 self.update_subplot3_histogram()
+                
+                # 【新增】同步主视图的拟合数据到subplot3
+                if hasattr(self.plot_canvas, 'gaussian_fits') and self.plot_canvas.gaussian_fits:
+                    print("Syncing fits from main view to subplot3")
+                    self.plot_canvas.save_current_fits()
+                    
                 # 更新cursor manager的关联
                 if self.popup_cursor_manager.isVisible():
                     self.popup_cursor_manager.set_plot_widget(self.subplot3_canvas)
+                    
             elif index == 0:  # 切换到主视图标签页
+                # 【新增】同步subplot3的拟合数据到主视图（如果适用）
+                if hasattr(self.subplot3_canvas, 'gaussian_fits') and self.subplot3_canvas.gaussian_fits:
+                    print("Syncing fits from subplot3 to main view")
+                    self.subplot3_canvas.save_current_fits()
+                    # 尝试在主视图的subplot3中显示拟合结果
+                    if hasattr(self.plot_canvas, 'restore_fits_from_shared_data'):
+                        # 注意：这里不直接应用到主视图，因为数据格式不同
+                        # 只在subplot3更新时应用
+                        pass
+                
                 # 更新cursor manager的关联
                 if self.popup_cursor_manager.isVisible():
                     self.popup_cursor_manager.set_plot_widget(self.plot_canvas)
@@ -807,11 +873,16 @@ class HistogramDialog(QDialog):
             self._handling_cursor_selection = False
     
     def on_region_selected(self, x_min, x_max):
-        """处理区域选择信号，确保 subplot2 更新"""
+        """处理区域选择信号，确保 subplot2 更新并同步拟合数据"""
         try:
             # 确保 subplot2 和 subplot3 被正确更新
             if hasattr(self.plot_canvas, 'update_highlighted_plots'):
                 self.plot_canvas.update_highlighted_plots()
+            
+            # 【新增】清除旧的拟合数据（因为数据已经变化）
+            if self.shared_fit_data.has_fits():
+                print("Clearing shared fit data due to data region change")
+                self.shared_fit_data.clear_fits()
             
             # 更新 subplot3 直方图
             self.update_subplot3_histogram()
@@ -844,6 +915,34 @@ class HistogramDialog(QDialog):
             self.popup_cursor_manager.raise_()
             self.popup_cursor_manager.activateWindow()
             self.popup_cursor_manager.setFocus()
+    
+    def toggle_fit_display(self):
+        """切换主视图subplot3中拟合曲线的显示状态"""
+        try:
+            self.fit_curves_visible = self.fit_display_toggle_btn.isChecked()
+            
+            # 在主视图的subplot3中切换拟合曲线显示
+            if hasattr(self.plot_canvas, '_ax3_fit_lines') and self.plot_canvas._ax3_fit_lines:
+                for line in self.plot_canvas._ax3_fit_lines:
+                    if line and hasattr(line, 'set_visible'):
+                        line.set_visible(self.fit_curves_visible)
+                
+                # 重绘主视图
+                self.plot_canvas.draw()
+                
+                # 更新状态栏
+                status = "visible" if self.fit_curves_visible else "hidden"
+                self.status_bar.showMessage(f"Fit curves in main view subplot3 are now {status}")
+                print(f"Toggled fit display: {status}, lines count: {len(self.plot_canvas._ax3_fit_lines)}")
+            else:
+                self.status_bar.showMessage("No fit curves to toggle in main view")
+                print("No _ax3_fit_lines found or list is empty")
+                
+        except Exception as e:
+            self.status_bar.showMessage(f"Error toggling fit display: {str(e)}")
+            print(f"Error in toggle_fit_display: {e}")
+            import traceback
+            traceback.print_exc()
     
     def update_subplot3_histogram_optimized(self):
         """更新subplot3直方图 - 优化版，支持cursor功能和实时更新"""

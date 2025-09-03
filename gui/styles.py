@@ -58,7 +58,7 @@ DARK_PLOT_STYLE = {
 # 全局样式表
 GLOBAL_STYLE = f"""
 QWidget {{
-    font-family: 'Segoe UI', 'SF Pro Text', -apple-system, BlinkMacSystemFont, 'Helvetica Neue', Arial, sans-serif;
+    font-family: Helvetica Neue, Arial;
     color: {COLORS["text"]};
 }}
 

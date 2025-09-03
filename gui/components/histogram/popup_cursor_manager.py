@@ -38,8 +38,9 @@ class PopupCursorManager(QWidget):  # 改用QWidget替代QDialog
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
         self.setWindowTitle("Cursor Manager")
         
-        # 扩展窗口尺寸，确保完整显示
-        self.setFixedSize(350, 650)
+        # 【修复问题2】设置初始尺寸，但允许用户调整
+        self.resize(380, 650)
+        self.setMinimumSize(300, 400)  # 设置最小尺寸
         
         # 【修复点3】添加递归调用防护机制
         self._updating_data = False  # 防止递归更新的标志
@@ -161,7 +162,14 @@ class PopupCursorManager(QWidget):  # 改用QWidget替代QDialog
         # 确保列表控件能够正常接收用户输入
         self.cursor_list.itemClicked.connect(self.on_cursor_item_clicked)
         self.cursor_list.itemSelectionChanged.connect(self.on_selection_changed)  # 新增选择变化信号
-        self.cursor_list.setMinimumHeight(200)  # 增加高度
+        self.cursor_list.setMinimumHeight(120)  # 【修复】降低高度以便更好的UI布局
+        # 【修复问题2】确保列表可以滚动，显示所有光标
+        self.cursor_list.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        self.cursor_list.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        # 【修复问题2】额外设置以确保滚动条正常工作
+        self.cursor_list.setVerticalScrollMode(QListWidget.ScrollMode.ScrollPerPixel)
+        self.cursor_list.setHorizontalScrollMode(QListWidget.ScrollMode.ScrollPerPixel)
+        self.cursor_list.setResizeMode(QListWidget.ResizeMode.Adjust)
         # 确保控件可以正常交互
         self.cursor_list.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
         self.cursor_list.setEnabled(True)

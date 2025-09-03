@@ -11,7 +11,7 @@ from datetime import datetime
 
 from PyQt6.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QLabel, 
                             QTabWidget, QFileDialog, QMessageBox, QGroupBox, 
-                            QStatusBar, QWidget, QSplitter)
+                            QStatusBar, QWidget, QSplitter, QPushButton)
 from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QIcon
 
@@ -23,6 +23,7 @@ from .data_manager import HistogramDataManager
 from .controls import HistogramControlPanel, FileChannelControl
 from .export_tools import ExportToolsPanel, IntegratedDataExporter, ImageClipboardManager, HistogramExporter
 from .fit_info_panel import FitInfoPanel
+from .popup_cursor_manager import PopupCursorManager
 
 
 class HistogramDialog(QDialog):
@@ -87,6 +88,35 @@ class HistogramDialog(QDialog):
         main_tab_layout.addWidget(self.plot_toolbar)
         main_tab_layout.addWidget(self.plot_canvas)
         
+        # 在主视图右上角添加cursor manager滑出按钮
+        cursor_btn_layout = QHBoxLayout()
+        cursor_btn_layout.addStretch()  # 推到右边
+        
+        self.cursor_toggle_btn = QPushButton("Cursors")
+        self.cursor_toggle_btn.setFixedSize(75, 28)
+        self.cursor_toggle_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #f5f5f5;
+                border: 1px solid #d0d0d0;
+                border-radius: 4px;
+                font-size: 11px;
+                padding: 4px 8px;
+                color: #333333;
+            }
+            QPushButton:hover {
+                background-color: #e8e8e8;
+                border-color: #b0b0b0;
+            }
+            QPushButton:pressed {
+                background-color: #d4d4d4;
+                border-color: #888888;
+            }
+        """)
+        self.cursor_toggle_btn.clicked.connect(self.toggle_cursor_manager)
+        
+        cursor_btn_layout.addWidget(self.cursor_toggle_btn)
+        main_tab_layout.insertLayout(0, cursor_btn_layout)  # 插入到顶部
+        
         # Subplot3直方图标签页
         self.subplot3_tab = QWidget()
         subplot3_tab_layout = QHBoxLayout(self.subplot3_tab)  # 使用水平布局来并排直方图和信息面板
@@ -117,6 +147,8 @@ class HistogramDialog(QDialog):
         self.fit_info_panel = FitInfoPanel(self)
         info_layout.addWidget(self.fit_info_panel)
         
+
+        
         # 调试信息
         print("Fit info panel created")
         
@@ -138,46 +170,95 @@ class HistogramDialog(QDialog):
         self.status_bar = QStatusBar()
         self.status_bar.showMessage("Ready")
         
+        # ================ 初始化弹窗式cursor manager ================
+        self.popup_cursor_manager = PopupCursorManager(self)
+        self.popup_cursor_manager.hide()  # 初始状态为隐藏
+        
         # ================ 将各部分添加到主布局 ================
         self.main_layout.addWidget(top_widget)
         self.main_layout.addWidget(self.tab_widget, 1)  # 标签页控件占大部分空间
         self.main_layout.addWidget(self.status_bar)
     
     def connect_signals(self):
-        """连接信号和槽"""
-        # 文件加载
-        self.file_channel_control.load_file_btn.clicked.connect(self.load_file)
+        """连接信号和槽 - 修复版，避免循环调用"""
+        # 【修复点1】添加信号连接防护机制
+        if hasattr(self, '_connecting_signals') and self._connecting_signals:
+            return
         
-        # 通道选择
-        self.file_channel_control.channel_changed.connect(self.on_channel_changed)
-        
-        # 采样率变化
-        self.file_channel_control.sampling_rate_changed.connect(self.on_sampling_rate_changed)
-        
-        # 直方图控制信号
-        self.histogram_control.bins_changed.connect(self.on_bins_changed)
-        self.histogram_control.highlight_size_changed.connect(self.on_highlight_size_changed)
-        self.histogram_control.highlight_position_changed.connect(self.on_highlight_position_changed)
-        self.histogram_control.log_x_changed.connect(self.on_log_x_changed)
-        self.histogram_control.log_y_changed.connect(self.on_log_y_changed)
-        self.histogram_control.kde_changed.connect(self.on_kde_changed)
-        self.histogram_control.invert_data_changed.connect(self.on_invert_data_changed)
-        self.histogram_control.clear_fits_requested.connect(self.on_clear_fits_requested)
-        
-        # 标签页切换
-        self.tab_widget.currentChanged.connect(self.on_tab_changed)
-        
-        # 导出工具信号
-        self.export_tools.export_comprehensive_requested.connect(self.on_export_comprehensive)
-        self.export_tools.copy_image_requested.connect(self.on_copy_images)
-        
-        # 拟合信息面板信号
-        self.fit_info_panel.fit_deleted.connect(self.on_fit_deleted)
-        self.fit_info_panel.fits_deleted.connect(self.on_fits_deleted)
-        self.fit_info_panel.fit_edited.connect(self.on_fit_edited)
-        self.fit_info_panel.fit_selected.connect(self.on_fit_selected)
-        self.fit_info_panel.copy_all_fits.connect(self.on_copy_fit_info)
-        self.fit_info_panel.toggle_fit_labels.connect(self.on_toggle_fit_labels)
+        try:
+            self._connecting_signals = True
+            
+            # 文件加载
+            self.file_channel_control.load_file_btn.clicked.connect(self.load_file)
+            
+            # 通道选择
+            self.file_channel_control.channel_changed.connect(self.on_channel_changed)
+            
+            # 采样率变化
+            self.file_channel_control.sampling_rate_changed.connect(self.on_sampling_rate_changed)
+            
+            # 直方图控制信号
+            self.histogram_control.bins_changed.connect(self.on_bins_changed)
+            self.histogram_control.highlight_size_changed.connect(self.on_highlight_size_changed)
+            self.histogram_control.highlight_position_changed.connect(self.on_highlight_position_changed)
+            self.histogram_control.log_x_changed.connect(self.on_log_x_changed)
+            self.histogram_control.log_y_changed.connect(self.on_log_y_changed)
+            self.histogram_control.kde_changed.connect(self.on_kde_changed)
+            self.histogram_control.invert_data_changed.connect(self.on_invert_data_changed)
+            self.histogram_control.clear_fits_requested.connect(self.on_clear_fits_requested)
+            
+            # 标签页切换
+            self.tab_widget.currentChanged.connect(self.on_tab_changed)
+            
+            # 导出工具信号
+            self.export_tools.export_comprehensive_requested.connect(self.on_export_comprehensive)
+            self.export_tools.copy_image_requested.connect(self.on_copy_images)
+            
+            # 拟合信息面板信号
+            self.fit_info_panel.fit_deleted.connect(self.on_fit_deleted)
+            self.fit_info_panel.fits_deleted.connect(self.on_fits_deleted)
+            self.fit_info_panel.fit_edited.connect(self.on_fit_edited)
+            self.fit_info_panel.fit_selected.connect(self.on_fit_selected)
+            self.fit_info_panel.copy_all_fits.connect(self.on_copy_fit_info)
+            self.fit_info_panel.toggle_fit_labels.connect(self.on_toggle_fit_labels)
+            
+            # Popup Cursor管理器信号
+            self.popup_cursor_manager.cursor_position_changed.connect(self.on_cursor_position_changed)
+            self.popup_cursor_manager.cursor_selection_changed.connect(self.on_cursor_selection_changed)
+            
+            # 初始化cursor manager与plot canvas的关联
+            self.popup_cursor_manager.set_plot_widget(self.plot_canvas)
+            
+            # 优化cursor相关信号连接，避免重复连接
+            # 连接plot canvas的cursor相关信号
+            if hasattr(self.plot_canvas, 'cursor_selected'):
+                try:
+                    self.plot_canvas.cursor_selected.disconnect(self.on_plot_cursor_selected)
+                except:
+                    pass  # 如果没有连接则忽略
+                self.plot_canvas.cursor_selected.connect(self.on_plot_cursor_selected)
+                
+            if hasattr(self.subplot3_canvas, 'cursor_selected'):
+                try:
+                    self.subplot3_canvas.cursor_selected.disconnect(self.on_plot_cursor_selected)
+                except:
+                    pass
+                self.subplot3_canvas.cursor_selected.connect(self.on_plot_cursor_selected)
+            
+            # 连接 region_selected 信号用于高亮更新
+            if hasattr(self.plot_canvas, 'region_selected'):
+                try:
+                    self.plot_canvas.region_selected.disconnect(self.on_region_selected)
+                except:
+                    pass
+                self.plot_canvas.region_selected.connect(self.on_region_selected)
+                
+        except Exception as e:
+            print(f"Error connecting signals: {e}")
+            import traceback
+            traceback.print_exc()
+        finally:
+            self._connecting_signals = False
     
     def load_file(self):
         """加载文件"""
@@ -254,37 +335,53 @@ class HistogramDialog(QDialog):
             traceback.print_exc()
     
     def update_subplot3_histogram(self):
-        """更新subplot3直方图"""
-        if not hasattr(self.plot_canvas, 'data') or self.plot_canvas.data is None:
+        """更新subplot3直方图 - 添加递归防护"""
+        # 【修复点3】防止递归更新
+        if (not hasattr(self.plot_canvas, 'data') or self.plot_canvas.data is None or 
+            getattr(self, '_updating_subplot3', False)):
             return
         
-        # 获取当前的高亮数据（从subplot3）
-        highlight_min = self.plot_canvas.highlight_min
-        highlight_max = self.plot_canvas.highlight_max
-        data = self.plot_canvas.data
+        try:
+            self._updating_subplot3 = True
         
-        # 应用数据取反设置
-        highlighted_data = -data[highlight_min:highlight_max] if self.plot_canvas.invert_data else data[highlight_min:highlight_max]
-        
-        if len(highlighted_data) == 0:
-            return
-        
-        # 在subplot3_canvas中创建直方图视图
-        self.subplot3_canvas.plot_subplot3_histogram(
-            highlighted_data,
-            bins=self.histogram_control.get_bins(),
-            log_x=self.histogram_control.log_x_check.isChecked(),
-            log_y=self.histogram_control.log_y_check.isChecked(),
-            show_kde=self.histogram_control.kde_check.isChecked(),
-            file_name=os.path.basename(self.data_manager.file_path) if self.data_manager.file_path else ""
-        )
-        
-        # 清除拟合信息面板
-        self.fit_info_panel.clear_all_fits()
-        
-        # 设置subplot3_canvas的parent_dialog父组件为自己，这样可以访问fit_info_panel
-        self.subplot3_canvas.parent_dialog = self
-        print(f"Setting parent_dialog for subplot3_canvas: {self}")
+            # 获取当前的高亮数据（从subplot3）
+            highlight_min = self.plot_canvas.highlight_min
+            highlight_max = self.plot_canvas.highlight_max
+            data = self.plot_canvas.data
+            
+            # 应用数据取反设置
+            highlighted_data = -data[highlight_min:highlight_max] if self.plot_canvas.invert_data else data[highlight_min:highlight_max]
+            
+            if len(highlighted_data) == 0:
+                return
+            
+            # 在subplot3_canvas中创建直方图视图
+            self.subplot3_canvas.plot_subplot3_histogram(
+                highlighted_data,
+                bins=self.histogram_control.get_bins(),
+                log_x=self.histogram_control.log_x_check.isChecked(),
+                log_y=self.histogram_control.log_y_check.isChecked(),
+                show_kde=self.histogram_control.kde_check.isChecked(),
+                file_name=os.path.basename(self.data_manager.file_path) if self.data_manager.file_path else ""
+            )
+            
+            # 清除拟合信息面板
+            self.fit_info_panel.clear_all_fits()
+            
+            # 设置subplot3_canvas的parent_dialog父组件为自己，这样可以访问fit_info_panel
+            self.subplot3_canvas.parent_dialog = self
+            print(f"Setting parent_dialog for subplot3_canvas: {self}")
+            
+            # 设置cursor manager与subplot3 canvas的关联（如果是在Histogram标签页）
+            if self.tab_widget.currentIndex() == 1:  # Histogram标签页
+                self.popup_cursor_manager.set_plot_widget(self.subplot3_canvas)
+                
+        except Exception as e:
+            print(f"Error updating subplot3 histogram: {e}")
+            import traceback
+            traceback.print_exc()
+        finally:
+            self._updating_subplot3 = False
     
     def set_data(self, data, sampling_rate=None):
         """设置数据（外部调用）"""
@@ -413,9 +510,17 @@ class HistogramDialog(QDialog):
     def on_log_y_changed(self, enabled):
         """处理Y轴对数显示变化"""
         self.plot_canvas.set_log_y(enabled)
-        # 更新subplot3直方图
-        self.update_subplot3_histogram()
-        self.status_bar.showMessage(f"Y-axis logarithmic scale: {'enabled' if enabled else 'disabled'}")
+        
+        # 检查是否被禁用，如果被禁用则更新UI状态
+        if enabled and not self.plot_canvas.log_y:
+            # 对数刻度被禁用，更新复选框状态
+            self.histogram_control.log_y_check.setChecked(False)
+            self.status_bar.showMessage("Y-axis log scale disabled: histogram contains zero counts")
+        else:
+            # 更新subplot3直方图
+            self.update_subplot3_histogram()
+            self.status_bar.showMessage(f"Y-axis logarithmic scale: {'enabled' if enabled else 'disabled'}")
+            
     
     def on_kde_changed(self, enabled):
         """处理KDE曲线显示变化"""
@@ -432,12 +537,31 @@ class HistogramDialog(QDialog):
         self.status_bar.showMessage(f"Data inversion: {'enabled' if enabled else 'disabled'}")
     
     def on_tab_changed(self, index):
-        """处理标签页切换"""
-        if index == 1:  # 切换到直方图标签页
-            # 确保subplot3直方图是最新的
-            self.update_subplot3_histogram()
-            # 显示提示信息
-            self.status_bar.showMessage("Histogram view: Click and drag to select regions for Gaussian fitting")
+        """处理标签页切换 - 添加防护机制"""
+        # 【修复点4】防止在标签切换时产生递归调用
+        if getattr(self, '_changing_tab', False):
+            return
+            
+        try:
+            self._changing_tab = True
+            
+            if index == 1:  # 切换到直方图标签页
+                # 确保subplot3直方图是最新的
+                self.update_subplot3_histogram()
+                # 更新cursor manager的关联
+                if self.popup_cursor_manager.isVisible():
+                    self.popup_cursor_manager.set_plot_widget(self.subplot3_canvas)
+            elif index == 0:  # 切换到主视图标签页
+                # 更新cursor manager的关联
+                if self.popup_cursor_manager.isVisible():
+                    self.popup_cursor_manager.set_plot_widget(self.plot_canvas)
+                    
+        except Exception as e:
+            print(f"Error in tab change: {e}")
+            import traceback
+            traceback.print_exc()
+        finally:
+            self._changing_tab = False
     
     def on_clear_fits_requested(self):
         """处理清除高斯拟合请求"""
@@ -644,3 +768,157 @@ class HistogramDialog(QDialog):
                 "Copy Error",
                 error_msg
             )
+    
+    def on_cursor_position_changed(self, cursor_id, new_position):
+        """处理cursor位置变化"""
+        self.status_bar.showMessage(f"Cursor {cursor_id} moved to Y = {new_position:.4f}")
+        
+    def on_cursor_selection_changed(self, cursor_id):
+        """处理cursor选择变化"""
+        if cursor_id >= 0:
+            self.status_bar.showMessage(f"Selected cursor {cursor_id}")
+        else:
+            self.status_bar.showMessage("No cursor selected")
+    
+    def on_plot_cursor_selected(self, cursor_id):
+        """处理从 plot canvas 发来的 cursor 选中信号 - 修复防护"""
+        # 防止在cursor选中时产生递归调用
+        if getattr(self, '_handling_cursor_selection', False):
+            return
+            
+        try:
+            self._handling_cursor_selection = True
+            
+            # 更新cursor manager的状态
+            if self.popup_cursor_manager.isVisible():
+                self.popup_cursor_manager.update_from_plot()
+            
+            # 更新状态栏显示
+            if cursor_id is not None and cursor_id >= 0:
+                self.status_bar.showMessage(f"Selected cursor {cursor_id} from plot")
+            else:
+                self.status_bar.showMessage("Cursor selection cleared from plot")
+                
+        except Exception as e:
+            print(f"Error handling plot cursor selection: {e}")
+            import traceback
+            traceback.print_exc()
+        finally:
+            self._handling_cursor_selection = False
+    
+    def on_region_selected(self, x_min, x_max):
+        """处理区域选择信号，确保 subplot2 更新"""
+        try:
+            # 确保 subplot2 和 subplot3 被正确更新
+            if hasattr(self.plot_canvas, 'update_highlighted_plots'):
+                self.plot_canvas.update_highlighted_plots()
+            
+            # 更新 subplot3 直方图
+            self.update_subplot3_histogram()
+            
+            self.status_bar.showMessage(f"Region selected: {x_min:.3f} to {x_max:.3f}")
+            
+        except Exception as e:
+            print(f"Error handling region selection: {e}")
+            import traceback
+            traceback.print_exc()
+    
+    def toggle_cursor_manager(self):
+        """切换cursor manager面板的显示/隐藏"""
+        if self.popup_cursor_manager.isVisible():
+            self.popup_cursor_manager.hide()
+            self.cursor_toggle_btn.setText("Cursors")
+        else:
+            # 根据当前标签页设置cursor manager与正确的plot canvas的关联
+            current_tab = self.tab_widget.currentIndex()
+            if current_tab == 1:  # Histogram标签页
+                self.popup_cursor_manager.set_plot_widget(self.subplot3_canvas)
+            else:  # Main View标签页
+                self.popup_cursor_manager.set_plot_widget(self.plot_canvas)
+            
+            # 显示弹窗
+            self.popup_cursor_manager.show_popup()
+            self.cursor_toggle_btn.setText("Hide")
+            
+            # 强制激活窗口并获得焦点
+            self.popup_cursor_manager.raise_()
+            self.popup_cursor_manager.activateWindow()
+            self.popup_cursor_manager.setFocus()
+    
+    def update_subplot3_histogram_optimized(self):
+        """更新subplot3直方图 - 优化版，支持cursor功能和实时更新"""
+        if not hasattr(self.plot_canvas, 'data') or self.plot_canvas.data is None:
+            return
+        
+        try:
+            # 获取当前的高亮数据（从main view）
+            highlight_min = self.plot_canvas.highlight_min
+            highlight_max = self.plot_canvas.highlight_max
+            data = self.plot_canvas.data
+            
+            # 应用数据取反设置
+            highlighted_data = -data[highlight_min:highlight_max] if self.plot_canvas.invert_data else data[highlight_min:highlight_max]
+            
+            if len(highlighted_data) == 0:
+                return
+            
+            # 在subplot3_canvas中创建直方图视图 - 使用新的优化方法
+            self.subplot3_canvas.plot_subplot3_histogram(
+                highlighted_data,
+                bins=self.histogram_control.get_bins(),
+                log_x=self.histogram_control.log_x_check.isChecked(),
+                log_y=self.histogram_control.log_y_check.isChecked(),
+                show_kde=self.histogram_control.kde_check.isChecked(),
+                file_name=os.path.basename(self.data_manager.file_path) if self.data_manager.file_path else ""
+            )
+            
+            # 清除拟合信息面板
+            self.fit_info_panel.clear_all_fits()
+            
+            # 设置subplot3_canvas的parent_dialog父组件为自己，这样可以访问fit_info_panel
+            self.subplot3_canvas.parent_dialog = self
+            
+            # 设置cursor manager与subplot3 canvas的关联（如果是在Histogram标签页）
+            if self.tab_widget.currentIndex() == 1:  # Histogram标签页
+                self.popup_cursor_manager.set_plot_widget(self.subplot3_canvas)
+                # 启动实时数据更新（如果cursor管理器可见）
+                if self.popup_cursor_manager.isVisible():
+                    self.popup_cursor_manager.start_real_time_updates()
+                    
+        except Exception as e:
+            print(f"Error in update_subplot3_histogram_optimized: {e}")
+            import traceback
+            traceback.print_exc()
+    
+    def sync_cursor_data_between_views(self):
+        """同步两个视图之间的cursor数据"""
+        try:
+            # 获取当前活跃的视图
+            current_tab = self.tab_widget.currentIndex()
+            
+            if current_tab == 0:  # Main View
+                source_canvas = self.plot_canvas
+                target_canvas = self.subplot3_canvas
+            else:  # Histogram View
+                source_canvas = self.subplot3_canvas
+                target_canvas = self.plot_canvas
+            
+            # 只有在两个视图都有数据时才同步
+            if hasattr(source_canvas, 'cursors') and hasattr(target_canvas, 'cursors'):
+                # 复制cursor数据
+                target_canvas.cursors = source_canvas.cursors.copy()
+                target_canvas.cursor_counter = source_canvas.cursor_counter
+                target_canvas.selected_cursor = source_canvas.selected_cursor
+                
+                # 刷新目标视图的cursor显示
+                if current_tab == 0:
+                    if hasattr(target_canvas, 'refresh_cursors_for_histogram_mode'):
+                        target_canvas.refresh_cursors_for_histogram_mode()
+                else:
+                    if hasattr(target_canvas, 'refresh_cursors_after_plot_update'):
+                        target_canvas.refresh_cursors_after_plot_update()
+                        
+        except Exception as e:
+            print(f"Error syncing cursor data: {e}")
+            import traceback
+            traceback.print_exc()

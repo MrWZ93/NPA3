@@ -14,25 +14,16 @@ import matplotlib.patches as patches
 from scipy import stats
 from scipy.optimize import curve_fit
 import matplotlib.gridspec as gridspec
-from PyQt6.QtCore import pyqtSignal, QTimer
-
-import numpy as np
-from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
-from matplotlib.figure import Figure
-import matplotlib.pyplot as plt
-from matplotlib.widgets import SpanSelector, RectangleSelector
-import matplotlib.patches as patches
-from scipy import stats
-from scipy.optimize import curve_fit
-import matplotlib.gridspec as gridspec
-from PyQt6.QtCore import pyqtSignal, QTimer
+from PyQt6.QtCore import pyqtSignal, QTimer, Qt
 
 
 class HistogramPlot(FigureCanvas):
-    """直方图可视化画布"""
+    """直方图可视化画布（修复版）"""
     
     # 定义信号
     region_selected = pyqtSignal(float, float)
+    cursor_deselected = pyqtSignal()  # cursor被取消选中
+    cursor_selected = pyqtSignal(int)    # cursor被选中（发送cursor_id）
     
     def __init__(self, parent=None, width=8, height=6, dpi=100):
         self.fig = Figure(figsize=(width, height), dpi=dpi)
@@ -42,6 +33,13 @@ class HistogramPlot(FigureCanvas):
         # 保存父组件引用，这样可以访问拟合信息面板
         self.parent_dialog = parent
         print(f"HistogramPlot initialized with parent: {parent}")
+        
+        # 【修复点1】添加递归调用防护机制
+        self._updating_plot = False  # 防止plot更新的递归
+        self._updating_cursors = False  # 防止cursor更新的递归
+        self._drawing = False  # 防止draw()调用的递归
+        self._last_draw_time = 0  # 限制draw()调用频率
+        self._draw_throttle_interval = 0.05  # 50ms的绘制间隔限制
         
         # 创建三个子图，按照要求布局
         self.setup_subplots()
@@ -66,6 +64,46 @@ class HistogramPlot(FigureCanvas):
         
         # 标题
         self.file_name = ""  # 文件名称
+        
+        # Cursor 功能相关变量
+        self.cursors = []  # 存储所有cursor的列表
+        self.selected_cursor = None  # 当前选中的cursor
+        self.dragging = False  # 是否正在拖拽
+        self.drag_start_y = None  # 拖拽开始的y坐标
+        self.cursor_colors = ['red', 'blue', 'green', 'purple', 'orange', 'brown', 'pink', 'gray', 'olive', 'cyan']
+        self.cursor_counter = 0  # cursor计数器，用于生成唯一ID
+        
+        # 设置焦点策略以接收键盘事件
+        self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
+        
+        # 连接鼠标事件
+        self.mpl_connect('button_press_event', self.on_cursor_mouse_press)
+        self.mpl_connect('motion_notify_event', self.on_cursor_mouse_move)
+        self.mpl_connect('button_release_event', self.on_cursor_mouse_release)
+    
+    def _throttled_draw(self):
+        """限制频率的绘制方法，防止过度绘制导致的性能问题"""
+        # 【修复点7】限制draw()调用频率
+        if self._drawing:
+            return  # 如果正在绘制中，跳过
+            
+        import time
+        current_time = time.time()
+        
+        # 检查是否在限制间隔内
+        if current_time - self._last_draw_time < self._draw_throttle_interval:
+            return  # 距离上次绘制时间太短，跳过
+        
+        try:
+            self._drawing = True
+            self._last_draw_time = current_time
+            self.draw()
+        except Exception as e:
+            print(f"Error in _throttled_draw: {e}")
+            import traceback
+            traceback.print_exc()
+        finally:
+            self._drawing = False
         
     def setup_subplots(self):
         """设置三个子图的布局"""
@@ -248,8 +286,8 @@ class HistogramPlot(FigureCanvas):
         # 调整左边距以确保Y轴标题可见
         self.fig.subplots_adjust(left=0.08, right=0.99, wspace=0.05)
         
-        # 重绘
-        self.draw()
+        # 使用限制频率的重绘
+        self._throttled_draw()
     
     def _clean_data(self, data):
         """清理数据，移除NaN和Inf值"""
@@ -349,29 +387,180 @@ class HistogramPlot(FigureCanvas):
             import traceback
             traceback.print_exc()
             return -1, 1
-        
-    def toggle_fit_labels(self, visible):
-        """切换拟合标签的可见性"""
+    
+    def _check_log_scale_validity(self):
+        """检查数据是否适合对数刻度"""
         try:
-            if not hasattr(self, 'gaussian_fits'):
-                return False
+            # 检查是否有直方图数据
+            if not hasattr(self, 'hist_counts') or self.hist_counts is None:
+                # 如果没有直方图数据，检查原始数据
+                if self.data is None:
+                    return False
+                
+                # 获取高亮数据并检查
+                highlighted_data = -self.data[self.highlight_min:self.highlight_max] if self.invert_data else self.data[self.highlight_min:self.highlight_max]
+                highlighted_data = self._clean_data(highlighted_data)
+                
+                if highlighted_data is None or len(highlighted_data) == 0:
+                    return False
+                
+                # 计算直方图统计
+                try:
+                    counts, _ = np.histogram(highlighted_data, bins=self.bins)
+                    return np.all(counts > 0)  # 所有bin都必须有正值
+                except:
+                    return False
+            else:
+                # 使用已存在的直方图数据
+                return np.all(self.hist_counts > 0)
             
-            # 设置标签可见性状态
-            self.labels_visible = visible
-            
-            # 更新所有拟合标签的可见性
-            for fit in self.gaussian_fits:
-                if 'text' in fit:
-                    fit['text'].set_visible(visible)
-            
-            # 重绘
-            self.draw()
-            return True
         except Exception as e:
-            print(f"Error in toggle_fit_labels: {e}")
+            print(f"Error checking log scale validity: {e}")
+            return False
+        
+
+    
+    def plot_subplot3_histogram(self, data, bins=50, log_x=False, log_y=False, show_kde=False, file_name=""):
+        """
+        为subplot3绘制直方图（用于Histogram标签页）
+        支持cursor功能和实时更新
+        """
+        try:
+            # 清理数据
+            cleaned_data = self._clean_data(data)
+            if cleaned_data is None or len(cleaned_data) == 0:
+                print("Warning: No valid data for subplot3 histogram")
+                return
+            
+            # 设置当前绘图为histogram模式（为了区分主视图模式）
+            self.is_histogram_mode = True
+            self.histogram_data = cleaned_data
+            self.histogram_bins = bins
+            
+            # 使用ax作为主要的直方图轴（对于subplot3，ax就是唯一的轴）
+            if not hasattr(self, 'ax'):
+                # 如果没有ax，创建一个新的figure和axis
+                self.fig.clear()
+                self.ax = self.fig.add_subplot(111)
+            else:
+                self.ax.clear()
+            
+            # 绘制直方图
+            self.hist_counts, self.hist_bin_edges, _ = self.ax.hist(
+                cleaned_data, bins=bins, alpha=0.7, density=False
+            )
+            
+            # 设置标题和标签
+            if file_name:
+                self.ax.set_title(f"Histogram - {file_name}", fontsize=12, pad=10)
+            else:
+                self.ax.set_title("Histogram", fontsize=12, pad=10)
+            
+            self.ax.set_xlabel("Value", fontsize=11)
+            self.ax.set_ylabel("Count", fontsize=11)
+            
+            # 设置对数刻度
+            if log_x:
+                try:
+                    self.ax.set_xscale('log')
+                    self.log_x = True
+                except:
+                    print("Cannot set X-axis to log scale")
+                    self.log_x = False
+            else:
+                self.ax.set_xscale('linear')
+                self.log_x = False
+                
+            if log_y:
+                # 检查是否适合对数刻度
+                if self._check_log_scale_validity():
+                    try:
+                        self.ax.set_yscale('log')
+                        self.log_y = True
+                    except:
+                        print("Cannot set Y-axis to log scale")
+                        self.log_y = False
+                        self.ax.set_yscale('linear')
+                else:
+                    print("Y-axis log scale disabled: histogram contains zero counts")
+                    self.log_y = False
+                    self.ax.set_yscale('linear')
+            else:
+                self.ax.set_yscale('linear')
+                self.log_y = False
+            
+            # 添加KDE曲线
+            if show_kde and len(cleaned_data) > 1:
+                try:
+                    from scipy.stats import gaussian_kde
+                    kde = gaussian_kde(cleaned_data)
+                    x_range = np.linspace(cleaned_data.min(), cleaned_data.max(), 200)
+                    kde_values = kde(x_range)
+                    
+                    # 将KDE值缩放到直方图的尺度
+                    scale_factor = len(cleaned_data) * (self.hist_bin_edges[1] - self.hist_bin_edges[0])
+                    kde_values = kde_values * scale_factor
+                    
+                    self.kde_line = self.ax.plot(x_range, kde_values, 'r-', 
+                                               linewidth=2, alpha=0.8, label='KDE')[0]
+                    self.ax.legend()
+                except Exception as e:
+                    print(f"Error adding KDE: {e}")
+            
+            # 在histogram模式下，cursor显示在主axis上
+            # 刷新cursor显示
+            if hasattr(self, 'cursors') and self.cursors:
+                self.refresh_cursors_for_histogram_mode()
+            
+            # 调整布局
+            self.fig.tight_layout(pad=1.0)
+            
+            # 使用限制频率的重绘
+            self._throttled_draw()
+            
+        except Exception as e:
+            print(f"Error plotting subplot3 histogram: {e}")
             import traceback
             traceback.print_exc()
-            return False
+    
+    def refresh_cursors_for_histogram_mode(self):
+        """
+        在直方图模式下刷新cursor显示
+        """
+        try:
+            if not hasattr(self, 'cursors') or not self.cursors:
+                return
+                
+            # 在直方图模式下，cursor显示为垂直线（因为直方图是垂直的）
+            for cursor in self.cursors:
+                y_pos = cursor['y_position']
+                color = cursor['color']
+                
+                # 在主轴上创建垂直线
+                if hasattr(self, 'ax'):
+                    # 移除之前的线（如果存在）
+                    if 'histogram_line' in cursor and cursor['histogram_line']:
+                        try:
+                            cursor['histogram_line'].remove()
+                        except:
+                            pass
+                    
+                    # 创建新的垂直线
+                    cursor['histogram_line'] = self.ax.axvline(
+                        x=y_pos, color=color, 
+                        linestyle='--', linewidth=0.8, 
+                        alpha=0.6, zorder=20
+                    )
+                    
+                    # 如果是选中的cursor，加粗显示
+                    if cursor.get('selected', False):
+                        cursor['histogram_line'].set_linewidth(1.5)
+                        cursor['histogram_line'].set_alpha(0.9)
+                        
+        except Exception as e:
+            print(f"Error refreshing cursors for histogram mode: {e}")
+            import traceback
+            traceback.print_exc()
     
     def _validate_highlight_indices(self):
         """验证和修正高亮区域索引"""
@@ -411,19 +600,28 @@ class HistogramPlot(FigureCanvas):
             pass
     
     def on_select_span(self, xmin, xmax):
-        """处理用户在全数据图上选择的区域"""
-        # 将时间转换为数据点索引
-        min_idx = max(0, int(xmin * self.sampling_rate))
-        max_idx = min(len(self.data) - 1, int(xmax * self.sampling_rate))
-        
-        # 如果有定时器，使用延时更新来优化性能
-        if hasattr(self, 'span_update_timer') and self.span_update_timer:
-            self.pending_span = (min_idx, max_idx)
-            self.span_update_timer.start()
+        """处理用户在全数据图上选择的区域 - 修复更新问题"""
+        # 移除过于严格的递归防护，只在真正需要时防护
+        if self._updating_cursors:  # 只在更新cursor时防护
             return
-        
-        # 否则直接更新
-        self._update_span(min_idx, max_idx)
+            
+        try:
+            # 将时间转换为数据点索引
+            min_idx = max(0, int(xmin * self.sampling_rate))
+            max_idx = min(len(self.data) - 1, int(xmax * self.sampling_rate))
+            
+            # 如果有定时器，使用延时更新来优化性能
+            if hasattr(self, 'span_update_timer') and self.span_update_timer:
+                self.pending_span = (min_idx, max_idx)
+                self.span_update_timer.start()
+                return
+            
+            # 否则直接更新
+            self._update_span(min_idx, max_idx)
+        except Exception as e:
+            print(f"Error in on_select_span: {e}")
+            import traceback
+            traceback.print_exc()
     
     def _delayed_span_update(self):
         """延时更新span选择器的改变"""
@@ -432,113 +630,135 @@ class HistogramPlot(FigureCanvas):
             self.pending_span = None
     
     def _update_span(self, min_idx, max_idx):
-        """实际更新span选择器的改变"""
+        """实际更新span选择器的改变 - 修复更新问题"""
+        # 简化防护逻辑，只检查基本数据有效性
         if self.data is None or len(self.data) == 0:
             return
         
-        # 验证和修正索引
-        data_len = len(self.data)
-        min_idx = max(0, min(min_idx, data_len - 1))
-        max_idx = max(min_idx + 1, min(max_idx, data_len))
-        
-        # 更新高亮区域
-        self.highlight_min = min_idx
-        self.highlight_max = max_idx
-        
-        # 更新高亮区域绘图
-        if self.highlight_region:
-            self.highlight_region.remove()
-        
-        time_axis = np.arange(len(self.data)) / self.sampling_rate
-        self.highlight_region = self.ax1.axvspan(
-            time_axis[self.highlight_min], 
-            time_axis[self.highlight_max], 
-            alpha=0.3, color='yellow'
-        )
-        
-        # 更新子图2和子图3
-        self.update_highlighted_plots()
-        
-        # 重绘
-        self.draw()
+        try:
+            # 验证和修正索引
+            data_len = len(self.data)
+            min_idx = max(0, min(min_idx, data_len - 1))
+            max_idx = max(min_idx + 1, min(max_idx, data_len))
+            
+            # 更新高亮区域
+            self.highlight_min = min_idx
+            self.highlight_max = max_idx
+            
+            # 更新高亮区域绘图
+            if self.highlight_region:
+                self.highlight_region.remove()
+            
+            time_axis = np.arange(len(self.data)) / self.sampling_rate
+            self.highlight_region = self.ax1.axvspan(
+                time_axis[self.highlight_min], 
+                time_axis[self.highlight_max], 
+                alpha=0.3, color='yellow'
+            )
+            
+            # 更新子图2和子图3
+            self.update_highlighted_plots()
+            
+            # 使用限制频率的重绘
+            self._throttled_draw()
+            
+        except Exception as e:
+            print(f"Error in _update_span: {e}")
+            import traceback
+            traceback.print_exc()
     
     def update_highlighted_plots(self):
-        """更新高亮区域和直方图"""
+        """更新高亮区域和直方图 - 修复更新问题"""
+        # 简化防护逻辑
         if self.data is None:
             return
             
-        # 验证和修正高亮区域索引
-        self._validate_highlight_indices()
-        
-        # 清除子图2和子图3
-        self.ax2.clear()
-        self.ax3.clear()
-        
-        # 重设标题和标签 - 使用紧凑布局
-        self.ax2.set_title("Highlighted Region", fontsize=10, pad=2)
-        self.ax3.set_title("Histogram", fontsize=10, pad=2)
-        
-        self.ax2.set_xlabel("Time (s)", fontsize=9, labelpad=1)
-        self.ax2.set_ylabel("Amplitude", fontsize=9, labelpad=2, rotation=90)
-        self.ax3.set_xlabel("Count", fontsize=9, labelpad=1)
-        
-        # 减小刷度大小以节省空间
-        self.ax2.tick_params(labelsize=8, pad=1)
-        self.ax3.tick_params(labelsize=8, pad=1)
-        
-        # 获取高亮区域数据（应用数据取反）
-        highlighted_data = -self.data[self.highlight_min:self.highlight_max] if self.invert_data else self.data[self.highlight_min:self.highlight_max]
-        # 清理高亮数据
-        highlighted_data = self._clean_data(highlighted_data)
-        
-        time_axis = np.arange(len(self.data)) / self.sampling_rate
-        highlighted_time = time_axis[self.highlight_min:self.highlight_max]
-        
-        # 检查是否有有效的高亮数据
-        if highlighted_data is None or len(highlighted_data) == 0 or len(highlighted_time) == 0:
-            print("Warning: Empty highlighted region detected, skipping plot update")
-            # 设置默认的轴范围避免错误
-            self.ax2.set_xlim(0, 1)
-            self.ax2.set_ylim(-1, 1)
-            self.ax3.set_xlim(0, 1)
-            self.ax3.set_ylim(-1, 1)
-            return
-        
-        # 绘制高亮区域数据
-        self.ax2.plot(highlighted_time, highlighted_data, linewidth=0.7)
-        
-        # 设置对数轴 - 只对直方图生效
-        if self.log_x:
-            self.ax3.set_xscale('log')
-        else:
-            self.ax3.set_xscale('linear')
+        try:
+            # 验证和修正高亮区域索引
+            self._validate_highlight_indices()
             
-        if self.log_y:
-            self.ax3.set_yscale('log')
-        else:
-            self.ax3.set_yscale('linear')
-        
-        # 绘制直方图
-        counts, bins, _ = self.ax3.hist(
-            highlighted_data, 
-            bins=self.bins, 
-            orientation='horizontal',
-            alpha=0.7
-        )
-        
-        # 安全地设置轴范围
-        if len(highlighted_time) > 0:
-            self.ax2.set_xlim(highlighted_time[0], highlighted_time[-1])
-        
-        # 安全计算高亮区域数据的实际范围
-        if len(highlighted_data) > 0:
-            h_y_min, h_y_max = self._calculate_safe_ylim(highlighted_data)
-            self.ax2.set_ylim(h_y_min, h_y_max)
-            self.ax3.set_ylim(h_y_min, h_y_max)
+            # 清除子图2和子图3
+            self.ax2.clear()
+            self.ax3.clear()
             
-            # 绘制KDE曲线
-            if self.show_kde and len(highlighted_data) > 1:
-                self.plot_kde(highlighted_data)
+            # 重设标题和标签 - 使用紧凑布局
+            self.ax2.set_title("Highlighted Region", fontsize=10, pad=2)
+            self.ax3.set_title("Histogram", fontsize=10, pad=2)
+            
+            self.ax2.set_xlabel("Time (s)", fontsize=9, labelpad=1)
+            self.ax2.set_ylabel("Amplitude", fontsize=9, labelpad=2, rotation=90)
+            self.ax3.set_xlabel("Count", fontsize=9, labelpad=1)
+        
+            # 减小刷度大小以节省空间
+            self.ax2.tick_params(labelsize=8, pad=1)
+            self.ax3.tick_params(labelsize=8, pad=1)
+            
+            # 获取高亮区域数据（应用数据取反）
+            highlighted_data = -self.data[self.highlight_min:self.highlight_max] if self.invert_data else self.data[self.highlight_min:self.highlight_max]
+            # 清理高亮数据
+            highlighted_data = self._clean_data(highlighted_data)
+            
+            time_axis = np.arange(len(self.data)) / self.sampling_rate
+            highlighted_time = time_axis[self.highlight_min:self.highlight_max]
+            
+            # 检查是否有有效的高亮数据
+            if highlighted_data is None or len(highlighted_data) == 0 or len(highlighted_time) == 0:
+                print("Warning: Empty highlighted region detected, skipping plot update")
+                # 设置默认的轴范围避免错误
+                self.ax2.set_xlim(0, 1)
+                self.ax2.set_ylim(-1, 1)
+                self.ax3.set_xlim(0, 1)
+                self.ax3.set_ylim(-1, 1)
+                return
+            
+            # 绘制高亮区域数据
+            self.ax2.plot(highlighted_time, highlighted_data, linewidth=0.7)
+            
+            # 绘制直方图
+            counts, bins, _ = self.ax3.hist(
+                highlighted_data, 
+                bins=self.bins, 
+                orientation='horizontal',
+                alpha=0.7
+            )
+            
+            # 检查对数刻度的有效性并在必要时禁用
+            if self.log_y and not np.all(counts > 0):
+                print("Warning: Disabling Y log scale due to zero counts in histogram")
+                self.log_y = False
+            
+            # 设置对数轴 - 只对直方图生效，并验证数据有效性
+            if self.log_x:
+                self.ax3.set_xscale('log')
+            else:
+                self.ax3.set_xscale('linear')
+                
+            if self.log_y and np.all(counts > 0):
+                self.ax3.set_yscale('log')
+            else:
+                self.ax3.set_yscale('linear')
+            
+            # 安全地设置轴范围
+            if len(highlighted_time) > 0:
+                self.ax2.set_xlim(highlighted_time[0], highlighted_time[-1])
+            
+            # 安全计算高亮区域数据的实际范围
+            if len(highlighted_data) > 0:
+                h_y_min, h_y_max = self._calculate_safe_ylim(highlighted_data)
+                self.ax2.set_ylim(h_y_min, h_y_max)
+                self.ax3.set_ylim(h_y_min, h_y_max)
+                
+                # 绘制KDE曲线
+                if self.show_kde and len(highlighted_data) > 1:
+                    self.plot_kde(highlighted_data)
+                    
+            # 刷新cursor显示
+            self.refresh_cursors_after_plot_update()
+            
+        except Exception as e:
+            print(f"Error in update_highlighted_plots: {e}")
+            import traceback
+            traceback.print_exc()
     
     def plot_kde(self, data):
         """绘制核密度估计曲线"""
@@ -601,6 +821,14 @@ class HistogramPlot(FigureCanvas):
         """设置Y轴对数显示"""
         if self.log_y != enabled:
             self.log_y = enabled
+            
+            # 检查数据是否适合对数刻度
+            if self.log_y and enabled:
+                can_use_log = self._check_log_scale_validity()
+                if not can_use_log:
+                    print("Warning: Cannot apply log scale - data contains zero or negative values")
+                    self.log_y = False
+                    return
             
             # 只更新直方图的轴类型
             if self.log_y:
@@ -704,8 +932,8 @@ class HistogramPlot(FigureCanvas):
         # 更新子图2和子图3
         self.update_highlighted_plots()
         
-        # 重绘
-        self.draw()
+        # 使用限制频率的重绘
+        self._throttled_draw()
     
     def plot_subplot3_histogram(self, data, bins=50, log_x=False, log_y=False, show_kde=False, file_name=""):
         """创建一个单独的subplot3直方图视图"""
@@ -771,17 +999,6 @@ class HistogramPlot(FigureCanvas):
         self.ax.set_xlabel("Amplitude", fontsize=10)
         self.ax.set_ylabel("Count", fontsize=10)
         
-        # 设置对数轴（如果启用）
-        if log_x:
-            self.ax.set_xscale('log')
-        else:
-            self.ax.set_xscale('linear')
-            
-        if log_y:
-            self.ax.set_yscale('log')
-        else:
-            self.ax.set_yscale('linear')
-        
         # 绘制直方图 - 调低透明度使背景更浅，并设置较低的zorder以使其位于数据后面
         self.histogram = self.ax.hist(
             data, 
@@ -791,6 +1008,24 @@ class HistogramPlot(FigureCanvas):
             edgecolor='black',
             zorder=5  # 设置较低的层级
         )
+        
+        # 获取直方图计数并检查对数刻度的有效性
+        hist_counts = self.histogram[0]
+        if log_y and not np.all(hist_counts > 0):
+            print("Warning: Disabling Y log scale due to zero counts in histogram")
+            log_y = False
+            self.histogram_log_y = False
+        
+        # 设置对数轴（如果启用并且数据有效）
+        if log_x:
+            self.ax.set_xscale('log')
+        else:
+            self.ax.set_xscale('linear')
+            
+        if log_y and np.all(hist_counts > 0):
+            self.ax.set_yscale('log')
+        else:
+            self.ax.set_yscale('linear')
         
         # 解析直方图数据
         self.hist_counts = self.histogram[0]
@@ -1112,15 +1347,538 @@ class HistogramPlot(FigureCanvas):
             
             # 重新绘制
             self.draw()
-            
-            print(f"Successfully deleted fit {fit_index}")
-            return True
-                
         except Exception as e:
-            print(f"Error in delete_specific_fit: {e}")
+            print(f"Error deleting specific fit: {e}")
             import traceback
             traceback.print_exc()
             return False
+    
+    # =================== Cursor 功能相关方法 ===================
+    
+    def add_cursor(self, y_position=None, color=None):
+        """添加一个cursor在Fig2和Fig3中"""
+        try:
+            # 如果没有指定y位置，默认使用中间位置
+            if y_position is None:
+                if hasattr(self, 'ax2') and len(self.ax2.get_ylim()) == 2:
+                    y_min, y_max = self.ax2.get_ylim()
+                    y_position = (y_min + y_max) / 2
+                else:
+                    y_position = 0  # 默认位置
+            
+            # 选择颜色
+            if color is None:
+                color = self.cursor_colors[len(self.cursors) % len(self.cursor_colors)]
+            
+            # 创建唯一ID
+            cursor_id = self.cursor_counter
+            self.cursor_counter += 1
+            
+            # 在Fig2中创建横向线
+            line_ax2 = None
+            if hasattr(self, 'ax2'):
+                line_ax2 = self.ax2.axhline(y=y_position, color=color, 
+                                          linestyle='--', linewidth=0.8, 
+                                          alpha=0.6, zorder=20)
+            
+            # 在Fig3中创建横向线
+            line_ax3 = None
+            if hasattr(self, 'ax3'):
+                line_ax3 = self.ax3.axhline(y=y_position, color=color, 
+                                          linestyle='--', linewidth=0.8, 
+                                          alpha=0.6, zorder=20)
+            
+            # 创建cursor对象
+            cursor = {
+                'id': cursor_id,
+                'y_position': y_position,
+                'color': color,
+                'line_ax2': line_ax2,
+                'line_ax3': line_ax3,
+                'selected': False
+            }
+            
+            # 添加到列表
+            self.cursors.append(cursor)
+            
+            # 重新绘制
+            self.draw()
+            
+            return cursor_id
+            
+        except Exception as e:
+            print(f"Error adding cursor: {e}")
+            import traceback
+            traceback.print_exc()
+            return None
+    
+    def remove_cursor(self, cursor_id):
+        """删除指定ID的cursor"""
+        try:
+            # 找到对应的cursor
+            cursor_to_remove = None
+            cursor_index = -1
+            
+            for i, cursor in enumerate(self.cursors):
+                if cursor['id'] == cursor_id:
+                    cursor_to_remove = cursor
+                    cursor_index = i
+                    break
+            
+            if cursor_to_remove is None:
+                print(f"Cursor with ID {cursor_id} not found")
+                return False
+            
+            # 从图中移除线条
+            if cursor_to_remove['line_ax2'] and cursor_to_remove['line_ax2'] in self.ax2.lines:
+                cursor_to_remove['line_ax2'].remove()
+            if cursor_to_remove['line_ax3'] and cursor_to_remove['line_ax3'] in self.ax3.lines:
+                cursor_to_remove['line_ax3'].remove()
+            
+            # 从列表中移除
+            self.cursors.pop(cursor_index)
+            
+            # 重新编号所有cursor
+            self._renumber_cursors()
+            
+            # 清除选中状态
+            if self.selected_cursor == cursor_to_remove:
+                self.selected_cursor = None
+            
+            # 使用限制频率的重绘
+            self._throttled_draw()
+            
+            return True
+            
+        except Exception as e:
+            print(f"Error removing cursor: {e}")
+            import traceback
+            traceback.print_exc()
+            return False
+    
+    def _renumber_cursors(self):
+        """重新编号所有cursor从1开始 - 优化版"""
+        try:
+            # 按照Y位置排序cursor，保持一致的显示顺序
+            sorted_cursors = sorted(self.cursors, key=lambda c: c['y_position'])
+            
+            # 重新编号从1开始
+            for i, cursor in enumerate(sorted_cursors):
+                cursor['id'] = i + 1
+            
+            # 更新cursor列表为排序后的列表
+            self.cursors = sorted_cursors
+            
+            # 重置cursor计数器
+            self.cursor_counter = len(self.cursors)
+            
+        except Exception as e:
+            print(f"Error renumbering cursors: {e}")
+            import traceback
+            traceback.print_exc()
+    
+    def clear_all_cursors(self):
+        """清除所有cursor"""
+        try:
+            # 移除所有线条
+            for cursor in self.cursors:
+                if cursor['line_ax2'] and cursor['line_ax2'] in self.ax2.lines:
+                    cursor['line_ax2'].remove()
+                if cursor['line_ax3'] and cursor['line_ax3'] in self.ax3.lines:
+                    cursor['line_ax3'].remove()
+            
+            # 清空列表
+            self.cursors.clear()
+            self.selected_cursor = None
+            
+            # 重新绘制
+            self.draw()
+            
+            return True
+            
+        except Exception as e:
+            print(f"Error clearing cursors: {e}")
+            import traceback
+            traceback.print_exc()
+            return False
+    
+    def get_cursor_info(self):
+        """获取所有cursor的信息"""
+        cursor_info = []
+        for cursor in self.cursors:
+            # 确保selected状态正确反映
+            is_selected = cursor.get('selected', False)
+            # 双重检查：如果这是当前选中的cursor，确保selected为True
+            if self.selected_cursor and cursor['id'] == self.selected_cursor.get('id'):
+                is_selected = True
+                cursor['selected'] = True  # 更新cursor对象中的状态
+            
+            info = {
+                'id': cursor['id'],
+                'y_position': cursor['y_position'],
+                'color': cursor['color'],
+                'selected': is_selected
+            }
+            cursor_info.append(info)
+        return cursor_info
+    
+    def update_cursor_position(self, cursor_id, new_y):
+        """更新cursor的位置并同步Fig2和Fig3"""
+        try:
+            # 找到对应的cursor
+            cursor = None
+            for c in self.cursors:
+                if c['id'] == cursor_id:
+                    cursor = c
+                    break
+            
+            if cursor is None:
+                return False
+            
+            # 更新y位置
+            cursor['y_position'] = new_y
+            
+            # 更新Fig2中的线
+            if cursor['line_ax2']:
+                cursor['line_ax2'].set_ydata([new_y, new_y])
+            
+            # 更新Fig3中的线
+            if cursor['line_ax3']:
+                cursor['line_ax3'].set_ydata([new_y, new_y])
+            
+            return True
+            
+        except Exception as e:
+            print(f"Error updating cursor position: {e}")
+            import traceback
+            traceback.print_exc()
+            return False
+    
+    def select_cursor(self, cursor_id):
+        """选中指定的cursor（视觉反馈）并发送信号 - 添加递归防护"""
+        # 【修复点6】递归防护
+        if self._updating_cursors:
+            return True
+            
+        try:
+            self._updating_cursors = True
+            
+            # 如果选中的是同一个cursor，不需要重复处理
+            if self.selected_cursor and self.selected_cursor.get('id') == cursor_id:
+                return True
+            
+            # 清除所有cursor的选中状态
+            for cursor in self.cursors:
+                cursor['selected'] = False
+                # 恢复正常的线条样式
+                if cursor.get('line_ax2'):
+                    cursor['line_ax2'].set_linewidth(0.8)
+                    cursor['line_ax2'].set_alpha(0.6)
+                if cursor.get('line_ax3'):
+                    cursor['line_ax3'].set_linewidth(0.8)
+                    cursor['line_ax3'].set_alpha(0.6)
+                # 如果在histogram模式下也要更新
+                if cursor.get('histogram_line'):
+                    cursor['histogram_line'].set_linewidth(0.8)
+                    cursor['histogram_line'].set_alpha(0.6)
+            
+            # 设置新的选中cursor
+            cursor_found = False
+            if cursor_id is not None:
+                for cursor in self.cursors:
+                    if cursor['id'] == cursor_id:
+                        cursor['selected'] = True
+                        self.selected_cursor = cursor
+                        cursor_found = True
+                        
+                        # 高亮线条样式
+                        if cursor.get('line_ax2'):
+                            cursor['line_ax2'].set_linewidth(1.5)
+                            cursor['line_ax2'].set_alpha(0.9)
+                        if cursor.get('line_ax3'):
+                            cursor['line_ax3'].set_linewidth(1.5)
+                            cursor['line_ax3'].set_alpha(0.9)
+                        # 如果在histogram模式下也要更新
+                        if cursor.get('histogram_line'):
+                            cursor['histogram_line'].set_linewidth(1.5)
+                            cursor['histogram_line'].set_alpha(0.9)
+                        
+                        # 发送cursor选中信号
+                        self.cursor_selected.emit(cursor_id)
+                        break
+                        
+                if not cursor_found:
+                    print(f"Warning: Cursor {cursor_id} not found for selection")
+                    self.selected_cursor = None
+                    return False
+            else:
+                self.selected_cursor = None
+                # 发送取消选中信号
+                self.cursor_deselected.emit()
+            
+            # 重新绘制
+            self.draw()
+            
+            return True
+            
+        except Exception as e:
+            print(f"Error selecting cursor: {e}")
+            import traceback
+            traceback.print_exc()
+            return False
+        finally:
+            self._updating_cursors = False
+    
+    def on_cursor_mouse_press(self, event):
+        """鼠标按下事件处理"""
+        try:
+            # 只在Fig2和Fig3中处理cursor操作，或者在histogram模式下的主axis
+            valid_axes = []
+            if hasattr(self, 'ax2'):
+                valid_axes.append(self.ax2)
+            if hasattr(self, 'ax3'):
+                valid_axes.append(self.ax3)
+            if hasattr(self, 'ax') and getattr(self, 'is_histogram_mode', False):
+                valid_axes.append(self.ax)
+                
+            if not (event.inaxes in valid_axes):
+                return
+            
+            # 处理左键和右键点击
+            if event.button == 1:  # 左键
+                # 检查是否点击在cursor附近
+                clicked_cursor = self._find_cursor_near_point(event.xdata, event.ydata, event.inaxes)
+                
+                if clicked_cursor:
+                    # 选中并开始拖拽
+                    self.select_cursor(clicked_cursor['id'])
+                    self.dragging = True
+                    self.drag_start_y = event.ydata
+                    # 阻止事件继续传播给其他处理器
+                    return True  # 返回true表示事件已处理
+                else:
+                    # 点击在空白区域，取消cursor选择
+                    self.select_cursor(None)
+                    
+            elif event.button == 3:  # 右键
+                # 右键点击添加新cursor
+                self.add_cursor(y_position=event.ydata)
+                return True  # 返回true表示事件已处理
+        
+        except Exception as e:
+            print(f"Error in cursor mouse press: {e}")
+            import traceback
+            traceback.print_exc()
+    
+    def on_cursor_mouse_move(self, event):
+        """鼠标移动事件处理"""
+        try:
+            # 只在拖拽状态下处理
+            if not self.dragging or not self.selected_cursor:
+                return
+            
+            # 只在Fig2和Fig3中处理
+            if not (event.inaxes == self.ax2 or event.inaxes == self.ax3):
+                return
+            
+            if event.ydata is not None:
+                # 更新cursor位置
+                self.update_cursor_position(self.selected_cursor['id'], event.ydata)
+                # 使用限制频率的重绘以显示拖拽效果
+                self._throttled_draw()
+                # 阻止事件传播
+                event.canvas.stop_event_loop = True
+        
+        except Exception as e:
+            print(f"Error in cursor mouse move: {e}")
+            import traceback
+            traceback.print_exc()
+    
+    def on_cursor_mouse_release(self, event):
+        """鼠标释放事件处理"""
+        try:
+            # 结束拖拽
+            self.dragging = False
+            self.drag_start_y = None
+        
+        except Exception as e:
+            print(f"Error in cursor mouse release: {e}")
+            import traceback
+            traceback.print_exc()
+    
+    def keyPressEvent(self, event):
+        """处理键盘事件"""
+        try:
+            # 只有在选中了cursor的情况下才处理键盘事件
+            if self.selected_cursor is None:
+                super().keyPressEvent(event)
+                return
+                
+            # 处理删除键（MacBook同时支持Delete和Backspace）
+            if event.key() in (Qt.Key.Key_Delete, Qt.Key.Key_Backspace):
+                cursor_id = self.selected_cursor['id']
+                self.remove_cursor(cursor_id)
+                event.accept()  # 标记事件已处理
+                
+            # 处理上下方向键微调位置
+            elif event.key() == Qt.Key.Key_Up:
+                cursor_id = self.selected_cursor['id']
+                self._adjust_cursor_position_optimized(cursor_id, 0.01)  # 增大步长
+                event.accept()
+                
+            elif event.key() == Qt.Key.Key_Down:
+                cursor_id = self.selected_cursor['id']
+                self._adjust_cursor_position_optimized(cursor_id, -0.01)  # 增大步长
+                event.accept()
+                
+            else:
+                super().keyPressEvent(event)
+                
+        except Exception as e:
+            print(f"Error in keyPressEvent: {e}")
+            import traceback
+            traceback.print_exc()
+            super().keyPressEvent(event)
+    
+    def _adjust_cursor_position_optimized(self, cursor_id, delta):
+        """优化的cursor位置微调"""
+        try:
+            # 获取当前cursor信息
+            cursor_info = self.get_cursor_info()
+            current_position = None
+            
+            for info in cursor_info:
+                if info['id'] == cursor_id:
+                    current_position = info['y_position']
+                    break
+                    
+            if current_position is not None:
+                new_position = current_position + delta
+                
+                # 直接更新cursor位置，不立即重绘
+                for cursor in self.cursors:
+                    if cursor['id'] == cursor_id:
+                        cursor['y_position'] = new_position
+                        
+                        # 更新Fig2中的线
+                        if cursor['line_ax2']:
+                            cursor['line_ax2'].set_ydata([new_position, new_position])
+                        
+                        # 更新Fig3中的线
+                        if cursor['line_ax3']:
+                            cursor['line_ax3'].set_ydata([new_position, new_position])
+                        
+                        break
+                
+                # 使用blit快速重绘
+                self.draw_idle()
+                    
+        except Exception as e:
+            print(f"Error adjusting cursor position: {e}")
+            import traceback
+            traceback.print_exc()
+    
+    def _find_cursor_near_point(self, x, y, axes):
+        """在指定的坐标附近查找cursor - 支持不同的axes类型"""
+        try:
+            if x is None or y is None:
+                return None
+            
+            # 计算容差范围（基于轴范围的一小部分）
+            if hasattr(axes, 'get_ylim'):
+                y_min, y_max = axes.get_ylim()
+                tolerance = (y_max - y_min) * 0.02  # 2%的容差
+            else:
+                tolerance = 0.1  # 默认容差
+            
+            # 查找最近的cursor
+            closest_cursor = None
+            min_distance = float('inf')
+            
+            for cursor in self.cursors:
+                # 在histogram模式下，cursor是垂直线，需要比较x坐标
+                if getattr(self, 'is_histogram_mode', False) and axes == getattr(self, 'ax', None):
+                    distance = abs(cursor['y_position'] - x)  # 在histogram模式下，cursor的y_position对应x坐标
+                else:
+                    distance = abs(cursor['y_position'] - y)  # 正常模式下比较y坐标
+                    
+                if distance < tolerance and distance < min_distance:
+                    min_distance = distance
+                    closest_cursor = cursor
+            
+            return closest_cursor
+            
+        except Exception as e:
+            print(f"Error finding cursor near point: {e}")
+            import traceback
+            traceback.print_exc()
+            return None
+    
+    def refresh_cursors_after_plot_update(self):
+        """在更新绘图后刷新cursor显示 - 添加递归防护"""
+        # 【修复点5】递归防护
+        if self._updating_cursors:
+            return
+            
+        try:
+            self._updating_cursors = True
+            
+            if not self.cursors:
+                return
+            
+            # 重新绘制所有cursor
+            for cursor in self.cursors:
+                y_pos = cursor['y_position']
+                color = cursor['color']
+                
+                # 重新在Fig2中创建线
+                if hasattr(self, 'ax2'):
+                    cursor['line_ax2'] = self.ax2.axhline(y=y_pos, color=color, 
+                                                         linestyle='--', linewidth=0.8, 
+                                                         alpha=0.6, zorder=20)
+                
+                # 重新在Fig3中创建线
+                if hasattr(self, 'ax3'):
+                    cursor['line_ax3'] = self.ax3.axhline(y=y_pos, color=color, 
+                                                         linestyle='--', linewidth=0.8, 
+                                                         alpha=0.6, zorder=20)
+                
+                # 如果是选中的cursor，恢复选中样式
+                if cursor.get('selected', False):
+                    if cursor['line_ax2']:
+                        cursor['line_ax2'].set_linewidth(1.5)
+                        cursor['line_ax2'].set_alpha(0.9)
+                    if cursor['line_ax3']:
+                        cursor['line_ax3'].set_linewidth(1.5)
+                        cursor['line_ax3'].set_alpha(0.9)
+                
+        except Exception as e:
+            print(f"Error refreshing cursors after plot update: {e}")
+            import traceback
+            traceback.print_exc()
+        finally:
+            self._updating_cursors = False
+    
+    def sync_cursor_data_real_time(self):
+        """实时同步cursor数据 - 用于实时更新"""
+        try:
+            # 返回最新的cursor信息，但不重绘全部界面
+            cursor_info = []
+            for cursor in self.cursors:
+                info = {
+                    'id': cursor['id'],
+                    'y_position': cursor['y_position'],
+                    'color': cursor['color'],
+                    'selected': cursor.get('selected', False)
+                }
+                cursor_info.append(info)
+            return cursor_info
+            
+        except Exception as e:
+            print(f"Error syncing cursor data: {e}")
+            import traceback
+            traceback.print_exc()
+            return []
     
     def _renumber_fits(self):
         """重新编号拟合项目并更新显示"""

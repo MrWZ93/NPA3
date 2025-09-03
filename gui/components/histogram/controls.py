@@ -32,14 +32,18 @@ class HistogramControlPanel(QWidget):
         self.main_layout = QVBoxLayout(self)
         self.main_layout.setContentsMargins(5, 5, 5, 5)  # 减小边距使布局更紧凑
         
-        # 初始化延时定时器，用于滑块优化
+        # 初始化延时定时器，用于滑块优化 - 【修复点】增加延迟时间
         self.size_timer = QTimer(self)
         self.size_timer.setSingleShot(True)
-        self.size_timer.setInterval(50)  # 50ms的延迟
+        self.size_timer.setInterval(150)  # 增加到150ms的延迟，减少信号频率
         
         self.position_timer = QTimer(self)
         self.position_timer.setSingleShot(True)
-        self.position_timer.setInterval(50)  # 50ms的延迟
+        self.position_timer.setInterval(150)  # 增加到150ms的延迟，减少信号频率
+        
+        # 【修复点】添加信号发送防护
+        self._emitting_size_signal = False
+        self._emitting_position_signal = False
         
         # 保存当前值
         self.current_size = 10
@@ -177,8 +181,15 @@ class HistogramControlPanel(QWidget):
         self.size_timer.start()
     
     def emit_size_changed(self):
-        """定时器超时后发送信号"""
-        self.highlight_size_changed.emit(self.current_size)
+        """定时器超时后发送信号 - 添加防护"""
+        # 【修复点】防止重复发送信号
+        if self._emitting_size_signal:
+            return
+        try:
+            self._emitting_size_signal = True
+            self.highlight_size_changed.emit(self.current_size)
+        finally:
+            self._emitting_size_signal = False
     
     def on_position_slider_moved(self, value):
         """处理滑块移动事件并使用延时优化"""
@@ -188,8 +199,15 @@ class HistogramControlPanel(QWidget):
         self.position_timer.start()
     
     def emit_position_changed(self):
-        """定时器超时后发送信号"""
-        self.highlight_position_changed.emit(self.current_position)
+        """定时器超时后发送信号 - 添加防护"""
+        # 【修复点】防止重复发送信号
+        if self._emitting_position_signal:
+            return
+        try:
+            self._emitting_position_signal = True
+            self.highlight_position_changed.emit(self.current_position)
+        finally:
+            self._emitting_position_signal = False
     
     def on_log_x_changed(self, state):
         """处理X轴对数显示变化"""

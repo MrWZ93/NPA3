@@ -690,6 +690,12 @@ class HistogramPlot(FigureCanvas):
             return
         
         try:
+            # [核心修复] 当数据区域即将改变时，旧的拟合曲线就失效了。
+            # 在执行任何重绘操作之前，先清除共享数据模型。
+            if self.shared_fit_data and self.shared_fit_data.has_fits():
+                print("[Fix] Clearing shared fit data from _update_span")
+                self.shared_fit_data.clear_fits()
+
             # 验证和修正索引
             data_len = len(self.data)
             min_idx = max(0, min(min_idx, data_len - 1))
@@ -710,7 +716,7 @@ class HistogramPlot(FigureCanvas):
                 alpha=0.3, color='yellow'
             )
             
-            # 更新子图2和子图3
+            # 更新子图2和子图3 (此时它将读到已被清空的模型)
             self.update_highlighted_plots()
             
             # 使用限制频率的重绘
@@ -827,6 +833,19 @@ class HistogramPlot(FigureCanvas):
             traceback.print_exc()
 
         # 【修复2】拟合逻辑放在最外层try-except之后，且判断highlighted_data是否有效
+        # 【关键修复】无论是否有共享拟合数据，都先清除ax3中的旧拟合线条
+        if hasattr(self, '_ax3_fit_lines') and self._ax3_fit_lines:
+            for line in self._ax3_fit_lines[:]:
+                try:
+                    if line and line in self.ax3.lines:
+                        line.remove()
+                except:
+                    pass  # 忽略已经被删除的线条
+            self._ax3_fit_lines.clear()
+        else:
+            # 确保列表存在
+            self._ax3_fit_lines = []
+        
         if (highlighted_data is not None and  # 确保变量已定义且有效
             hasattr(self, 'ax3') and 
             self.shared_fit_data is not None and 
@@ -834,19 +853,6 @@ class HistogramPlot(FigureCanvas):
             try:
                 # 获取拟合数据
                 fits, regions = self.shared_fit_data.get_fits()
-                
-                # 清除ax3中的旧的拟合线条（如果有）
-                if hasattr(self, '_ax3_fit_lines') and self._ax3_fit_lines:
-                    for line in self._ax3_fit_lines[:]:
-                        try:
-                            if line and line in self.ax3.lines:
-                                line.remove()
-                        except:
-                            pass  # 忽略已经被删除的线条
-                    self._ax3_fit_lines.clear()
-                else:
-                    # 确保列表存在
-                    self._ax3_fit_lines = []
                 
                 # 在ax3中绘制拟合曲线
                 for fit_data in fits:
@@ -1038,9 +1044,16 @@ class HistogramPlot(FigureCanvas):
     
     def update_highlight_size(self, size_percent):
         """更新高亮区域大小"""
+        """更新高亮区域大小"""
         if self.data is None or len(self.data) == 0:
             return
         
+        # [核心修复] 当数据区域即将改变时，旧的拟合曲线就失效了。
+        # 在执行任何重绘操作之前，先清除共享数据模型。
+        if self.shared_fit_data and self.shared_fit_data.has_fits():
+            print("[Fix] Clearing shared fit data from update_highlight_size")
+            self.shared_fit_data.clear_fits()
+
         # 验证当前索引
         self._validate_highlight_indices()
         
@@ -1077,7 +1090,7 @@ class HistogramPlot(FigureCanvas):
             alpha=0.3, color='yellow'
         )
         
-        # 更新子图2和子图3
+        # 更新子图2和子图3 (此时它将读到已被清空的模型)
         self.update_highlighted_plots()
         
         # 使用限制频率的重绘
@@ -2491,6 +2504,12 @@ class HistogramPlot(FigureCanvas):
         if self.data is None or len(self.data) == 0:
             return
         
+        # [核心修复] 当数据区域即将改变时，旧的拟合曲线就失效了。
+        # 在执行任何重绘操作之前，先清除共享数据模型。
+        if self.shared_fit_data and self.shared_fit_data.has_fits():
+            print("[Fix] Clearing shared fit data from move_highlight")
+            self.shared_fit_data.clear_fits()
+
         # 验证当前索引
         self._validate_highlight_indices()
         
@@ -2542,7 +2561,7 @@ class HistogramPlot(FigureCanvas):
             alpha=0.3, color='yellow'
         )
         
-        # 更新子图2和子图3
+        # 更新子图2和子图3 (此时它将读到已被清空的模型)
         self.update_highlighted_plots()
         
         # 重绘

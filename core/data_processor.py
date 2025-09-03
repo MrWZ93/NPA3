@@ -194,78 +194,111 @@ class FileDataProcessor:
                     traceback.print_exc()
             
             # 如果不是示波器格式或示波器加载器不可用，继续使用标准CSV加载
-            # 先读取文件前10行来分析文件结构
-            with open(file_path, 'r', errors='replace') as f:
-                header_lines = [f.readline() for _ in range(10)]
+            # 先读取文件内容来分析文件结构
+            with open(file_path, 'r', errors='replace', encoding='utf-8-sig') as f:
+                file_content = f.read()
             
-            # 检测可能的分隔符
+            # 统一处理行结尾符，将\r\n和\r都转换为\n
+            file_content = file_content.replace('\r\n', '\n').replace('\r', '\n')
+            lines = file_content.split('\n')
+            
+            # 检测可能的分隔符（基于前几行非注释行）
             possible_delimiters = [',', '\t', ';', ' ']
             delimiter = ','
-            for d in possible_delimiters:
-                if any(header_lines[i].count(d) > 1 for i in range(min(5, len(header_lines)))):
-                    delimiter = d
+            for line in lines[:10]:
+                if not line.startswith('#') and line.strip():
+                    for d in possible_delimiters:
+                        if line.count(d) > 1:
+                            delimiter = d
+                            break
                     break
             
-            # 检测文件是否有头部元数据/注释行
+            # 检测文件是否有头部元数据/注释行和采样率信息
             skip_rows = 0
-            for line in header_lines:
-                if line.strip() == "" or line.startswith("#"):
+            sampling_rate_found = None
+            
+            for i, line in enumerate(lines):
+                line = line.strip()
+                if line == "" or line.startswith("#"):
                     skip_rows += 1
+                    # 尝试提取采样率信息
+                    if "sampling rate" in line.lower() or "sample rate" in line.lower():
+                        import re
+                        # 查找数字（可能是整数或浮点数）
+                        numbers = re.findall(r'[0-9]+\.?[0-9]*', line)
+                        if numbers:
+                            try:
+                                rate = float(numbers[0])
+                                if rate > 0:
+                                    sampling_rate_found = rate
+                                    logging.info(f"Found sampling rate in header: {rate} Hz")
+                            except ValueError:
+                                pass
                 else:
                     break
-                    
-            # 使用分块读取处理大文件
+            
+            # 如果找到了采样率，更新默认值
+            if sampling_rate_found:
+                self.sampling_rate = sampling_rate_found
+            
+            # 使用不同方法尝试读取CSV数据
+            df = None
+            
+            # 方法1：使用pandas直接读取
             try:
-                # 尝试使用高效读取模式
-                df = pd.read_csv(file_path,
+                # 使用StringIO来处理预处理的内容
+                from io import StringIO
+                processed_content = '\n'.join(lines[skip_rows:])
+                
+                df = pd.read_csv(StringIO(processed_content),
                                 delimiter=delimiter,
-                                skiprows=skip_rows,
                                 on_bad_lines='skip',
-                                memory_map=True,  # 使用内存映射减少内存使用
-                                low_memory=True,  # 低内存模式
-                                dtype=None,       # 自动检测数据类型
-                                encoding='utf-8-sig')  # 处理带BOM的UTF-8
+                                low_memory=True,
+                                dtype=None)
             except Exception as e:
-                logging.warning(f"Initial CSV parsing failed: {str(e)}, trying alternative method")
+                logging.warning(f"StringIO CSV parsing failed: {str(e)}, trying direct file reading")
+            
+            # 方法2：如果方法1失败，尝试直接从文件读取
+            if df is None:
                 try:
-                    # 使用更宽松的引擎
                     df = pd.read_csv(file_path,
                                     delimiter=delimiter,
                                     skiprows=skip_rows,
-                                    engine='python',
-                                    on_bad_lines='skip')
-                except Exception as e2:
-                    logging.warning(f"Python engine CSV parsing failed: {str(e2)}, trying final fallback")
-                    # 最后的后备方案 - 使用迭代读取
-                    try:
-                        # 尝试分块读取并合并
-                        chunks = pd.read_csv(file_path,
-                                          delimiter=delimiter,
-                                          skiprows=skip_rows,
-                                          on_bad_lines='skip',
-                                          chunksize=10000)  # 每次读取10000行
-                        df = pd.concat([chunk for chunk in chunks])
-                    except:
-                        # 如果所有方法都失败，回退到原始的CSV解析器
-                        import csv
-                        with open(file_path, 'r', errors='replace') as f:
-                            reader = csv.reader(f, delimiter=delimiter)
-                            rows = list(reader)
-                        
-                        if not rows:
-                            raise ValueError("Cannot parse CSV file, no valid data rows found")
-                            
-                        # 找出最常见的列数
-                        col_counts = [len(row) for row in rows if row]
-                        most_common_count = max(set(col_counts), key=col_counts.count)
-                        
-                        # 只保留列数正确的行
-                        valid_rows = [row for row in rows if len(row) == most_common_count]
-                        
-                        if valid_rows:
-                            header = valid_rows[0]
-                            data = valid_rows[1:]
-                            df = pd.DataFrame(data, columns=header)
+                                    on_bad_lines='skip',
+                                    encoding='utf-8-sig',
+                                    engine='python')  # 使用python引擎处理特殊情况
+                except Exception as e:
+                    logging.warning(f"Direct file CSV parsing failed: {str(e)}, trying manual parsing")
+            
+            # 方法3：如果前两种方法都失败，使用手动解析
+            if df is None:
+                try:
+                    # 手动解析CSV数据
+                    import csv
+                    from io import StringIO
+                    processed_content = '\n'.join(lines[skip_rows:])
+                    
+                    # 使用csv模块解析
+                    reader = csv.reader(StringIO(processed_content), delimiter=delimiter)
+                    rows = [row for row in reader if row]  # 过滤空行
+                    
+                    if not rows:
+                        raise ValueError("Cannot parse CSV file, no valid data rows found")
+                    
+                    # 第一行作为列标题
+                    header = [col.strip() for col in rows[0]]
+                    data_rows = rows[1:]
+                    
+                    # 创建DataFrame
+                    df = pd.DataFrame(data_rows, columns=header)
+                    
+                except Exception as e:
+                    logging.error(f"Manual CSV parsing also failed: {str(e)}")
+                    raise ValueError(f"Cannot parse CSV file: {str(e)}")
+            
+            # 如果df仍然为空，抛出错误
+            if df is None or df.empty:
+                raise ValueError("No valid data found in CSV file")
             
             # 尝试将所有可能的列转换为数值
             for col in df.columns:
@@ -290,47 +323,66 @@ class FileDataProcessor:
             if numeric_columns:
                 self.file_info["Numeric Columns"] = ", ".join(numeric_columns)
             
-            # 首先检查是否有时间列
-            time_cols = [col for col in df.columns if any(time_keyword in str(col).lower() 
-                            for time_keyword in ['time', 'date', '时间', '日期'])]
+            # 如果找到了采样率，添加到文件信息中
+            if sampling_rate_found:
+                self.file_info["Sampling Rate"] = f"{sampling_rate_found} Hz"
+            
+            # 清理列名（移除两端空格和特殊字符）
+            df.columns = [col.strip() for col in df.columns]
+            
+            # 检查是否有时间相关的列（更广泛的检测）
+            time_cols = []
+            for col in df.columns:
+                col_lower = str(col).lower()
+                if any(keyword in col_lower for keyword in ['time', 'date', '时间', '日期', 'index']):
+                    time_cols.append(col)
             
             # 构建数据字典
             self.current_data = {}
             
-            # 如果有时间列，尝试将其作为X轴
-            x_data = None
-            if time_cols and len(time_cols) > 0:
+            # 如果有时间相关列，尝试使用第一个作为时间轴
+            time_column_used = None
+            if time_cols:
                 time_col = time_cols[0]
                 try:
-                    # 尝试将时间列转换为日期时间格式
-                    x_data = pd.to_datetime(df[time_col])
-                    self.file_info["Time Column"] = time_col
-                except:
-                    # 如果转换失败，使用原始数据
-                    x_data = df[time_col].values
+                    # 尝试转换为数值类型（对于time_index类型）
+                    time_data = pd.to_numeric(df[time_col], errors='coerce')
+                    if not time_data.isna().all():  # 如果成功转换为数值
+                        self.current_data[time_col] = time_data.values
+                        time_column_used = time_col
+                        self.file_info["Time Column"] = time_col
+                        logging.info(f"Using column '{time_col}' as time axis")
+                except Exception as e:
+                    logging.warning(f"Failed to process time column '{time_col}': {str(e)}")
             
-            # 将数值列加载为数据通道
-            for col in numeric_columns:
-                if col in time_cols:
-                    continue  # 跳过时间列
-                
-                # 将列数据保存到字典中
-                self.current_data[col] = df[col].values
+            # 将所有数值列加载为数据通道
+            data_channels_count = 0
+            for col in df.columns:
+                if col == time_column_used:
+                    continue  # 已经处理过的时间列
+                    
+                try:
+                    # 尝试转换为数值类型
+                    numeric_data = pd.to_numeric(df[col], errors='coerce')
+                    if not numeric_data.isna().all():  # 如果有有效的数值数据
+                        # 将NaN值替换为0
+                        self.current_data[col] = numeric_data.fillna(0).values
+                        data_channels_count += 1
+                    else:
+                        logging.warning(f"Column '{col}' contains no valid numeric data, skipping")
+                except Exception as e:
+                    logging.warning(f"Failed to process column '{col}': {str(e)}")
             
-            # 如果没有找到数值列，尝试将所有列都加载为数据
-            if not self.current_data:
-                for col in df.columns:
-                    try:
-                        # 尝试将列转换为数值类型
-                        values = pd.to_numeric(df[col], errors='coerce').fillna(0).values
-                        self.current_data[col] = values
-                    except:
-                        # 如果转换失败，跳过该列
-                        continue
+            # 检查是否有有效数据
+            if data_channels_count == 0:
+                raise ValueError("Cannot find any valid numeric data columns in CSV file")
             
-            # 如果仍然没有数据，返回错误
-            if not self.current_data:
-                raise ValueError("Cannot find valid numeric data in CSV file")
+            logging.info(f"Successfully loaded {data_channels_count} data channels from CSV file")
+            if time_column_used:
+                logging.info(f"Time column: {time_column_used}")
+            
+            # 添加加载的通道数到文件信息
+            self.file_info["Data Channels Loaded"] = data_channels_count
                 
         except Exception as e:
             self.file_info = {

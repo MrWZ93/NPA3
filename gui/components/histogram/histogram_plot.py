@@ -1260,22 +1260,23 @@ class HistogramPlot(FigureCanvas):
     
     def save_current_fits(self):
         """保存当前的拟合结果到共享数据"""
-        if not hasattr(self, 'gaussian_fits') or not self.gaussian_fits:
-            return
-            
         try:
+            # 【修复Bug1关键修复】不管是否有拟合结果，都要更新共享数据状态
             # 计算数据哈希值
             data_hash = self._calculate_data_hash()
-            data_range = (self.histogram_data.min(), self.histogram_data.max()) if hasattr(self, 'histogram_data') else None
+            data_range = (self.histogram_data.min(), self.histogram_data.max()) if hasattr(self, 'histogram_data') and self.histogram_data is not None else None
+            
+            # 获取当前的拟合结果（可能为空）
+            current_fits = self.gaussian_fits if hasattr(self, 'gaussian_fits') else []
+            current_regions = [(r[0], r[1]) for r in self.fit_regions if len(r) >= 2] if hasattr(self, 'fit_regions') else []
             
             # 保存到本地管理器
-            regions = [(r[0], r[1]) for r in self.fit_regions if len(r) >= 2]
-            self.fit_data_manager.save_fits(self.gaussian_fits, regions, data_range, data_hash)
+            self.fit_data_manager.save_fits(current_fits, current_regions, data_range, data_hash)
             
-            # 保存到共享数据
+            # 保存到共享数据（即使是空的也要保存，这样可以清空共享数据）
             if self.shared_fit_data is not None:
-                self.shared_fit_data.save_fits(self.gaussian_fits, regions, data_range, data_hash)
-                print(f"Saved {len(self.gaussian_fits)} fits to shared data")
+                self.shared_fit_data.save_fits(current_fits, current_regions, data_range, data_hash)
+                print(f"Saved {len(current_fits)} fits to shared data (including empty state)")
                 
         except Exception as e:
             print(f"Error saving fits: {e}")
@@ -1637,7 +1638,7 @@ class HistogramPlot(FigureCanvas):
     def clear_fits(self):
         """清除所有高斯拟合"""
         try:
-            # 【新增】先保存清空状态到共享数据
+            # 【修复Bug1】先保存清空状态到共享数据
             if self.shared_fit_data is not None:
                 self.shared_fit_data.clear_fits()
             
@@ -1666,6 +1667,9 @@ class HistogramPlot(FigureCanvas):
             # 清除拟合信息面板
             if hasattr(self, 'parent_dialog') and self.parent_dialog and hasattr(self.parent_dialog, 'fit_info_panel'):
                 self.parent_dialog.fit_info_panel.clear_all_fits()
+            
+            # 【修复Bug2】立即同步清空状态到主视图
+            self.immediate_sync_to_main_view()
             
             # 重绘
             self.draw()
@@ -1720,8 +1724,18 @@ class HistogramPlot(FigureCanvas):
             if self.highlighted_fit_index >= len(self.gaussian_fits):
                 self.highlighted_fit_index = -1
             
-            # 【新增】保存更新后的拟合结果到共享数据
-            self.save_current_fits()
+            # 【修复Bug1关键修复】先检查是否所有拟合都被删除了
+            if len(self.gaussian_fits) == 0:
+                # 如果所有拟合都被删除，直接清空共享数据
+                if self.shared_fit_data is not None:
+                    self.shared_fit_data.clear_fits()
+                    print("Cleared shared fit data after deleting last fit")
+            else:
+                # 如果还有其他拟合，保存当前状态
+                self.save_current_fits()
+            
+            # 【修复Bug2】立即同步到主视图
+            self.immediate_sync_to_main_view()
             
             # 重新绘制
             self.draw()
@@ -2361,8 +2375,18 @@ class HistogramPlot(FigureCanvas):
                 if self.highlighted_fit_index >= len(self.gaussian_fits):
                     self.highlighted_fit_index = -1
                 
-                # 【新增】保存更新后的拟合结果到共享数据
-                self.save_current_fits()
+                # 【修复Bug1关键修复】先检查是否所有拟合都被删除了
+                if len(self.gaussian_fits) == 0:
+                    # 如果所有拟合都被删除，直接清空共享数据
+                    if self.shared_fit_data is not None:
+                        self.shared_fit_data.clear_fits()
+                        print("Cleared shared fit data after deleting all fits")
+                else:
+                    # 如果还有其他拟合，保存当前状态
+                    self.save_current_fits()
+                
+                # 【修复Bug2】同步到主视图
+                self.immediate_sync_to_main_view()
                 
                 # 重新绘制
                 self.draw()
@@ -2436,8 +2460,9 @@ class HistogramPlot(FigureCanvas):
                     if hasattr(self, 'parent_dialog') and self.parent_dialog and hasattr(self.parent_dialog, 'fit_info_panel'):
                         self.parent_dialog.fit_info_panel.update_fit(fit_num, amp, mu, sigma, x_range, color)
                     
-                    # 【新增】保存更新后的拟合结果到共享数据
+                    # 【修复Bug1&2】保存更新后的拟合结果到共享数据并同步到主视图
                     self.save_current_fits()
+                    self.immediate_sync_to_main_view()
                     
                     # 重新绘制
                     self.draw()

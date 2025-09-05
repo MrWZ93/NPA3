@@ -403,14 +403,28 @@ class HistogramDialog(QDialog):
             self.subplot3_canvas.parent_dialog = self
             print(f"Setting parent_dialog for subplot3_canvas: {self}")
             
-            # 【新增】尝试从共享数据恢复拟合结果
-            if self.shared_fit_data.has_fits():
+            # 【修复Bug1】只有在确实有有效的共享拟合数据时才恢复
+            # 并且要确保数据一致性
+            if (self.shared_fit_data.has_fits() and 
+                hasattr(self.subplot3_canvas, 'histogram_data') and 
+                self.subplot3_canvas.histogram_data is not None):
+                    
                 print("Attempting to restore fits from shared data to subplot3")
-                if self.subplot3_canvas.restore_fits_from_shared_data():
-                    print("Successfully restored fits to subplot3")
+                # 计算当前数据的哈希值用于验证
+                current_data_hash = self.subplot3_canvas._calculate_data_hash() if hasattr(self.subplot3_canvas, '_calculate_data_hash') else None
+                
+                # 检查数据兼容性
+                if (hasattr(self.shared_fit_data, 'is_compatible_with_data') and 
+                    current_data_hash is not None and
+                    self.shared_fit_data.is_compatible_with_data(None, current_data_hash)):
+                        
+                    if self.subplot3_canvas.restore_fits_from_shared_data():
+                        print("Successfully restored fits to subplot3")
+                    else:
+                        print("Failed to restore fits - clearing shared data")
+                        self.shared_fit_data.clear_fits()
                 else:
-                    print("Failed to restore fits - data may have changed")
-                    # 数据变化了，清除共享拟合数据
+                    print("Data incompatible or changed - clearing shared fit data")
                     self.shared_fit_data.clear_fits()
             
             # 设置cursor manager与subplot3 canvas的关联（如果是在Histogram标签页）

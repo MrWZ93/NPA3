@@ -163,6 +163,8 @@ class PopupCursorManager(QDialog):  # 改用QDialog而不是QWidget
         # 确保列表控件能够正常接收用户输入
         self.cursor_list.itemClicked.connect(self.on_cursor_item_clicked)
         self.cursor_list.itemSelectionChanged.connect(self.on_selection_changed)
+        # 创建自定义列表类来处理空白处点击
+        self.cursor_list.mousePressEvent = self.cursor_list_mouse_press_event
         self.cursor_list.setMinimumHeight(120)
         # 设置滚动条
         self.cursor_list.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
@@ -592,6 +594,20 @@ class PopupCursorManager(QDialog):  # 改用QDialog而不是QWidget
             finally:
                 self._user_interacting = False
                 
+    def cursor_list_mouse_press_event(self, event):
+        """处理cursor列表的鼠标按下事件，支持点击空白处取消选中"""
+        # 获取点击位置的item
+        item = self.cursor_list.itemAt(event.pos())
+        
+        if item is None:
+            # 点击的是空白处，清除选择
+            self.cursor_list.clearSelection()
+            self.cursor_list.setCurrentItem(None)
+            self.deselect_cursor()
+        else:
+            # 点击的是有效item，调用原始的mousePressEvent
+            QListWidget.mousePressEvent(self.cursor_list, event)
+            
     def on_selection_changed(self):
         """处理列表选择变化"""
         current_item = self.cursor_list.currentItem()
@@ -599,6 +615,9 @@ class PopupCursorManager(QDialog):  # 改用QDialog而不是QWidget
             cursor_id = current_item.data(Qt.ItemDataRole.UserRole)
             if cursor_id is not None:
                 self.select_cursor(cursor_id)
+        else:
+            # 如果没有选中的item，取消选中
+            self.deselect_cursor()
     
     def on_position_editing_finished(self):
         """处理位置编辑完成"""

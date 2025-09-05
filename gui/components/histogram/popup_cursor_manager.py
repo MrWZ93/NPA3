@@ -6,15 +6,15 @@ Popup Cursor Manager - 弹窗式cursor管理器（修复版）
 修复了窗口交互异常和递归调用问题
 """
 
-from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QPushButton, 
+from PyQt6.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QPushButton, 
                              QListWidget, QListWidgetItem, QLabel, QDoubleSpinBox,
-                             QMessageBox, QGroupBox, QFrame, QMainWindow)
+                             QMessageBox, QGroupBox, QFrame, QMainWindow, QSizePolicy)
 from PyQt6.QtCore import Qt, pyqtSignal, QTimer
 from PyQt6.QtGui import QColor
 import numpy as np
 
 
-class PopupCursorManager(QWidget):  # 改用QWidget替代QDialog
+class PopupCursorManager(QDialog):  # 改用QDialog而不是QWidget
     """弹窗式Cursor管理器界面（彻底修复版）"""
     
     # 定义信号
@@ -23,35 +23,36 @@ class PopupCursorManager(QWidget):  # 改用QWidget替代QDialog
     cursor_deleted = pyqtSignal(int)  # cursor_id
     
     def __init__(self, parent=None):
+        # 使用标准Dialog设置
         super().__init__(parent)
-        self.plot_widget = None  # 关联的HistogramPlot对象
+        self.original_parent = parent
+        self.plot_widget = None
         self.selected_cursor_id = None
         
-        # 设置为工具窗口，确保可以正常交互
-        self.setWindowFlags(
-            Qt.WindowType.Tool |
-            Qt.WindowType.WindowTitleHint |
-            Qt.WindowType.WindowCloseButtonHint |
-            Qt.WindowType.WindowStaysOnTopHint
-        )
-        # 简化属性设置，确保交互正常
-        self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
+        # 简化窗口设置，使用标准对话框模式
         self.setWindowTitle("Cursor Manager")
+        self.setModal(False)  # 非模态对话框，允许与其他窗口交互
         
-        # 【修复问题2】设置初始尺寸，但允许用户调整
-        self.resize(380, 650)
-        self.setMinimumSize(300, 400)  # 设置最小尺寸
+        # 【修复问题2】监听父窗口关闭事件
+        if parent:
+            parent.installEventFilter(self)
+        
+        # 设置初始尺寸，与histogram窗口高度一致
+        self.resize(380, 800)  # 高度调整为800，与histogram窗口一致
+        self.setMinimumSize(300, 400)
+        self.setMaximumSize(800, 1200)
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         
         # 【修复点3】添加递归调用防护机制
-        self._updating_data = False  # 防止递归更新的标志
-        self._refreshing_list = False  # 防止列表刷新的递归
-        self._last_cursor_info_hash = None  # 用于检测数据变化
+        self._updating_data = False
+        self._refreshing_list = False
+        self._last_cursor_info_hash = None
         
-        # 【修复点4】设置数据实时更新定时器 - 降低频率，添加用户交互检测
+        # 【修复点4】设置数据实时更新定时器
         self.update_timer = QTimer()
         self.update_timer.timeout.connect(self.update_data_from_plot)
         self.update_timer.setSingleShot(False)
-        self._user_interacting = False  # 用户正在交互的标志
+        self._user_interacting = False
         
         self.setup_ui()
         
@@ -161,18 +162,16 @@ class PopupCursorManager(QWidget):  # 改用QWidget替代QDialog
         self.cursor_list = QListWidget()
         # 确保列表控件能够正常接收用户输入
         self.cursor_list.itemClicked.connect(self.on_cursor_item_clicked)
-        self.cursor_list.itemSelectionChanged.connect(self.on_selection_changed)  # 新增选择变化信号
-        self.cursor_list.setMinimumHeight(120)  # 【修复】降低高度以便更好的UI布局
-        # 【修复问题2】确保列表可以滚动，显示所有光标
+        self.cursor_list.itemSelectionChanged.connect(self.on_selection_changed)
+        self.cursor_list.setMinimumHeight(120)
+        # 设置滚动条
         self.cursor_list.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
         self.cursor_list.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
-        # 【修复问题2】额外设置以确保滚动条正常工作
         self.cursor_list.setVerticalScrollMode(QListWidget.ScrollMode.ScrollPerPixel)
         self.cursor_list.setHorizontalScrollMode(QListWidget.ScrollMode.ScrollPerPixel)
         self.cursor_list.setResizeMode(QListWidget.ResizeMode.Adjust)
-        # 确保控件可以正常交互
-        self.cursor_list.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
-        self.cursor_list.setEnabled(True)
+        # 设置选择模式
+        self.cursor_list.setSelectionMode(QListWidget.SelectionMode.SingleSelection)
         self.cursor_list.setStyleSheet("""
             QListWidget {
                 border: 1px solid #cccccc;
@@ -228,10 +227,7 @@ class PopupCursorManager(QWidget):  # 改用QWidget替代QDialog
         self.position_spinbox.setSingleStep(0.01)
         # 添加用户交互检测
         self.position_spinbox.valueChanged.connect(self.on_position_changed)
-        self.position_spinbox.editingFinished.connect(self.on_position_editing_finished)  # 新增编辑完成信号
-        self.position_spinbox.setEnabled(False)
-        # 确保数字输入框可以正常交互
-        self.position_spinbox.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
+        self.position_spinbox.editingFinished.connect(self.on_position_editing_finished)
         self.position_spinbox.setEnabled(False)  # 初始状态为禁用
         self.position_spinbox.setStyleSheet("""
             QDoubleSpinBox {
@@ -320,32 +316,29 @@ class PopupCursorManager(QWidget):  # 改用QWidget替代QDialog
         
         self.setLayout(layout)
         
-        # 简化窗口属性设置
-        self.setWindowModality(Qt.WindowModality.NonModal)
+    def eventFilter(self, obj, event):
+        """事件过滤器 - 监听父窗口关闭事件"""
+        # 【修复问题2】当父窗口关闭时，同时关闭cursor manager
+        if obj == self.original_parent and event.type() == event.Type.Close:
+            self.force_close()
+        return super().eventFilter(obj, event)
         
     def show_popup(self):
         """显示弹窗并定位到合适位置"""
-        if self.parent():
-            # 获取父窗口的几何信息
-            parent_geom = self.parent().geometry()
+        if self.original_parent:
+            # 获取原始父窗口的几何信息
+            parent_geom = self.original_parent.geometry()
             
-            # 定位到父窗口右侧
-            x = parent_geom.x() + parent_geom.width() + 10
-            y = parent_geom.y() + 50
+            # 定位到父窗口右侧，窗口完全平齐
+            x = parent_geom.x() + parent_geom.width() + 5  # 紧贴右侧，间距5像素
+            y = parent_geom.y()  # y坐标完全对齐，窗口顶部平齐
             
             self.move(x, y)
         
-        # 显示窗口
+        # 显示对话框
         self.show()
         self.raise_()
         self.activateWindow()
-        
-        # 延迟设置焦点，确保窗口完全显示后再获得焦点
-        from PyQt6.QtCore import QTimer
-        QTimer.singleShot(100, lambda: (
-            self.setFocus(),
-            self.activateWindow()
-        ))
         
         # 启动数据实时更新
         self.start_real_time_updates()
@@ -353,19 +346,24 @@ class PopupCursorManager(QWidget):  # 改用QWidget替代QDialog
     def closeEvent(self, event):
         """窗口关闭时停止定时器"""
         self.stop_real_time_updates()
-        super().closeEvent(event)
+        # 移除事件过滤器
+        if self.original_parent:
+            self.original_parent.removeEventFilter(self)
+        # 接受关闭事件
+        event.accept()
+    
+    def force_close(self):
+        """强制关闭窗口（用于程序退出时）"""
+        self.stop_real_time_updates()
+        self.close()
     
     def focusInEvent(self, event):
         """获得焦点时的处理"""
         super().focusInEvent(event)
-        # 确保窗口可以正常接收事件
-        self.activateWindow()
     
     def mousePressEvent(self, event):
         """鼠标按下事件处理"""
         super().mousePressEvent(event)
-        # 确保窗口获得焦点
-        self.activateWindow()
         
     def start_real_time_updates(self):
         """启动实时数据更新 - 降低频率，避免干扰用户交互"""
@@ -427,8 +425,44 @@ class PopupCursorManager(QWidget):  # 改用QWidget替代QDialog
             return 0
         
     def set_plot_widget(self, plot_widget):
-        """设置关联的HistogramPlot对象"""
+        """设置关联的HistogramPlot对象 - 【修复问题2】保持cursor数据持久性"""
+        # 保存当前cursor数据
+        saved_cursor_data = None
+        saved_selected_cursor_id = self.selected_cursor_id
+        
+        if self.plot_widget and hasattr(self.plot_widget, 'cursors'):
+            # 保存当前cursor数据
+            saved_cursor_data = [cursor.copy() for cursor in self.plot_widget.cursors]
+            print(f"Saving {len(saved_cursor_data)} cursors before switching plot widget")
+        
+        # 设置新的plot widget
         self.plot_widget = plot_widget
+        
+        # 如果有保存的cursor数据，在新widget中恢复
+        if saved_cursor_data and plot_widget:
+            # 检查新widget是否已经有cursor数据
+            if not hasattr(plot_widget, 'cursors') or not plot_widget.cursors:
+                # 如果新widget没有cursor数据，则恢复保存的数据
+                print(f"Restoring {len(saved_cursor_data)} cursors to new plot widget")
+                plot_widget.cursors = saved_cursor_data
+                if hasattr(plot_widget, 'cursor_counter'):
+                    plot_widget.cursor_counter = max([c.get('id', 0) for c in saved_cursor_data], default=0)
+                # 恢复选中状态
+                for cursor in plot_widget.cursors:
+                    cursor['selected'] = (cursor.get('id') == saved_selected_cursor_id)
+                if saved_selected_cursor_id is not None:
+                    plot_widget.selected_cursor = next(
+                        (c for c in plot_widget.cursors if c.get('id') == saved_selected_cursor_id), 
+                        None
+                    )
+                    self.selected_cursor_id = saved_selected_cursor_id
+                # 刷新cursor显示
+                if hasattr(plot_widget, 'refresh_cursors_for_histogram_mode'):
+                    plot_widget.refresh_cursors_for_histogram_mode()
+                elif hasattr(plot_widget, 'refresh_cursors_after_plot_update'):
+                    plot_widget.refresh_cursors_after_plot_update()
+        
+        # 刷新cursor列表显示
         self.refresh_cursor_list()
         
         # 连接plot的cursor相关信号，避免重复连接

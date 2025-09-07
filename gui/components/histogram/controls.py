@@ -62,56 +62,59 @@ class HistogramControlPanel(QWidget):
         hist_layout = QVBoxLayout(hist_group)
         hist_layout.setContentsMargins(5, 5, 5, 5)  # 减小内边距
         
-        # 上部区域：箱数和复选框并排
-        top_layout = QHBoxLayout()
-        
-        # 箱数控制
+        # Bins设置 - 单独一行
         bins_layout = QHBoxLayout()
         bins_layout.addWidget(QLabel("Bins:"))
         self.bins_spin = QSpinBox()
         self.bins_spin.setRange(5, 500)
         self.bins_spin.setValue(200)
         self.bins_spin.setSingleStep(5)
+        self.bins_spin.setFixedWidth(80)
         bins_layout.addWidget(self.bins_spin)
+        bins_layout.addStretch()
+        hist_layout.addLayout(bins_layout)
         
-        # 添加显示选项 - 水平排列
-        options_layout = QHBoxLayout()
+        # 显示选项 - 两行布局
+        options_layout1 = QHBoxLayout()
+        options_layout2 = QHBoxLayout()
         
         # X轴对数显示
         self.log_x_check = QCheckBox("Log X")
         self.log_x_check.setToolTip("Display the histogram X-axis using logarithmic scale")
-        self.log_x_check.setChecked(False)  # 默认不勾选
+        self.log_x_check.setChecked(False)
         
         # Y轴对数显示
         self.log_y_check = QCheckBox("Log Y")
         self.log_y_check.setToolTip("Display the histogram Y-axis using logarithmic scale")
-        self.log_y_check.setChecked(False)  # 默认不勾选
+        self.log_y_check.setChecked(False)
         
         # KDE显示
         self.kde_check = QCheckBox("KDE")
         self.kde_check.setToolTip("Overlay a kernel density estimation curve on the histogram")
-        self.kde_check.setChecked(False)  # 默认不勾选
+        self.kde_check.setChecked(False)
         
         # 数据取反
         self.invert_data_check = QCheckBox("Invert")
         self.invert_data_check.setToolTip("Invert the data values (multiply by -1)")
-        self.invert_data_check.setChecked(False)  # 默认不勾选
+        self.invert_data_check.setChecked(False)
         
-        # 清除高斯拟合按钮
-        self.clear_fits_btn = QPushButton("Clear Fits")
-        self.clear_fits_btn.setToolTip("Clear all Gaussian fits")
-        self.clear_fits_btn.setFixedWidth(80)
+        # 清除高斯拟合按钮 - 移动到右侧面板，这里不再添加
+        # self.clear_fits_btn = QPushButton("Clear Fits")
+        # self.clear_fits_btn.setToolTip("Clear all Gaussian fits")
+        # self.clear_fits_btn.setFixedWidth(80)
         
-        # 添加所有选项到布局
-        top_layout.addLayout(bins_layout)
-        top_layout.addStretch(1)  # 添加弹性空间使复选框靠右
-        top_layout.addWidget(self.log_x_check)
-        top_layout.addWidget(self.log_y_check)
-        top_layout.addWidget(self.kde_check)
-        top_layout.addWidget(self.invert_data_check)
-        top_layout.addWidget(self.clear_fits_btn)
+        # 第一行选项
+        options_layout1.addWidget(self.log_x_check)
+        options_layout1.addWidget(self.log_y_check)
+        options_layout1.addStretch()
         
-        hist_layout.addLayout(top_layout)
+        # 第二行选项
+        options_layout2.addWidget(self.kde_check)
+        options_layout2.addWidget(self.invert_data_check)
+        options_layout2.addStretch()
+        
+        hist_layout.addLayout(options_layout1)
+        hist_layout.addLayout(options_layout2)
         
         # 高亮区域设置
         highlight_layout = QVBoxLayout()
@@ -170,8 +173,8 @@ class HistogramControlPanel(QWidget):
         # 数据取反选项
         self.invert_data_check.stateChanged.connect(self.on_invert_data_changed)
         
-        # 清除高斯拟合按钮
-        self.clear_fits_btn.clicked.connect(self.on_clear_fits_clicked)
+        # 清除高斯拟合按钮 (已移动到右侧面板)
+        # self.clear_fits_btn.clicked.connect(self.on_clear_fits_clicked)
     
     def on_size_slider_moved(self, value):
         """处理滑块移动事件并使用延时优化"""

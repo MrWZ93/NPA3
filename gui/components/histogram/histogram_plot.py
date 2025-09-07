@@ -1750,6 +1750,23 @@ class HistogramPlot(FigureCanvas):
     
     # =================== Cursor 功能相关方法 ===================
     
+    def get_cursor_info(self):
+        """获取所有cursor的信息"""
+        cursor_info = []
+        try:
+            if hasattr(self, 'cursors') and self.cursors:
+                for cursor in self.cursors:
+                    info = {
+                        'id': cursor.get('id', 0),
+                        'y_position': cursor.get('y_position', 0),
+                        'color': cursor.get('color', 'red'),
+                        'selected': cursor.get('selected', False)
+                    }
+                    cursor_info.append(info)
+        except Exception as e:
+            print(f"Error getting cursor info: {e}")
+        return cursor_info
+    
     def add_cursor(self, y_position=None, color=None):
         """添加一个cursor在Fig2和Fig3中"""
         try:
@@ -2298,7 +2315,227 @@ class HistogramPlot(FigureCanvas):
             print(f"Error syncing cursor data: {e}")
             import traceback
             traceback.print_exc()
-            return []
+    
+    def refresh_cursors_after_plot_update(self):
+        """在绘图更新后刷新cursor显示"""
+        try:
+            if not hasattr(self, 'cursors') or not self.cursors:
+                return
+            
+            # 在主视图模式下，cursor显示为水平线（在Fig2和Fig3中）
+            for cursor in self.cursors:
+                y_pos = cursor['y_position']
+                color = cursor['color']
+                
+                # 在Fig2中创建横向线
+                if hasattr(self, 'ax2'):
+                    # 移除之前的线（如果存在）
+                    if 'line_ax2' in cursor and cursor['line_ax2']:
+                        try:
+                            cursor['line_ax2'].remove()
+                        except:
+                            pass
+                    
+                    # 创建新的横向线
+                    cursor['line_ax2'] = self.ax2.axhline(
+                        y=y_pos, color=color, 
+                        linestyle='--', linewidth=0.8, 
+                        alpha=0.6, zorder=20
+                    )
+                
+                # 在Fig3中创建横向线
+                if hasattr(self, 'ax3'):
+                    # 移除之前的线（如果存在）
+                    if 'line_ax3' in cursor and cursor['line_ax3']:
+                        try:
+                            cursor['line_ax3'].remove()
+                        except:
+                            pass
+                    
+                    # 创建新的横向线
+                    cursor['line_ax3'] = self.ax3.axhline(
+                        y=y_pos, color=color, 
+                        linestyle='--', linewidth=0.8, 
+                        alpha=0.6, zorder=20
+                    )
+                
+                # 如果是选中的cursor，加粗显示
+                if cursor.get('selected', False):
+                    if 'line_ax2' in cursor and cursor['line_ax2']:
+                        cursor['line_ax2'].set_linewidth(1.5)
+                        cursor['line_ax2'].set_alpha(0.9)
+                    if 'line_ax3' in cursor and cursor['line_ax3']:
+                        cursor['line_ax3'].set_linewidth(1.5)
+                        cursor['line_ax3'].set_alpha(0.9)
+                        
+        except Exception as e:
+            print(f"Error refreshing cursors after plot update: {e}")
+            import traceback
+            traceback.print_exc()
+    
+    def update_cursor_position(self, cursor_id, new_position):
+        """更新指定cursor的位置"""
+        try:
+            if not hasattr(self, 'cursors') or not self.cursors:
+                return False
+                
+            # 找到对应的cursor
+            cursor_to_update = None
+            for cursor in self.cursors:
+                if cursor['id'] == cursor_id:
+                    cursor_to_update = cursor
+                    break
+            
+            if cursor_to_update is None:
+                print(f"Cursor with ID {cursor_id} not found")
+                return False
+            
+            # 更新位置
+            cursor_to_update['y_position'] = new_position
+            
+            # 更新显示
+            if 'line_ax2' in cursor_to_update and cursor_to_update['line_ax2']:
+                try:
+                    cursor_to_update['line_ax2'].remove()
+                except:
+                    pass
+                    
+                if hasattr(self, 'ax2'):
+                    cursor_to_update['line_ax2'] = self.ax2.axhline(
+                        y=new_position, color=cursor_to_update['color'], 
+                        linestyle='--', linewidth=0.8, 
+                        alpha=0.6, zorder=20
+                    )
+            
+            if 'line_ax3' in cursor_to_update and cursor_to_update['line_ax3']:
+                try:
+                    cursor_to_update['line_ax3'].remove()
+                except:
+                    pass
+                    
+                if hasattr(self, 'ax3'):
+                    cursor_to_update['line_ax3'] = self.ax3.axhline(
+                        y=new_position, color=cursor_to_update['color'], 
+                        linestyle='--', linewidth=0.8, 
+                        alpha=0.6, zorder=20
+                    )
+            
+            # 如果在histogram模式下，也要更新
+            if hasattr(self, 'is_histogram_mode') and self.is_histogram_mode:
+                if 'histogram_line' in cursor_to_update and cursor_to_update['histogram_line']:
+                    try:
+                        cursor_to_update['histogram_line'].remove()
+                    except:
+                        pass
+                        
+                    if hasattr(self, 'ax'):
+                        cursor_to_update['histogram_line'] = self.ax.axvline(
+                            x=new_position, color=cursor_to_update['color'], 
+                            linestyle='--', linewidth=0.8, 
+                            alpha=0.6, zorder=20
+                        )
+            
+            return True
+            
+        except Exception as e:
+            print(f"Error updating cursor position: {e}")
+            import traceback
+            traceback.print_exc()
+            return False
+    
+    def select_cursor(self, cursor_id):
+        """选中指定的cursor"""
+        try:
+            if not hasattr(self, 'cursors'):
+                return False
+                
+            # 清除所有cursor的选中状态
+            for cursor in self.cursors:
+                cursor['selected'] = False
+                # 恢复正常显示
+                if 'line_ax2' in cursor and cursor['line_ax2']:
+                    cursor['line_ax2'].set_linewidth(0.8)
+                    cursor['line_ax2'].set_alpha(0.6)
+                if 'line_ax3' in cursor and cursor['line_ax3']:
+                    cursor['line_ax3'].set_linewidth(0.8)
+                    cursor['line_ax3'].set_alpha(0.6)
+                if 'histogram_line' in cursor and cursor['histogram_line']:
+                    cursor['histogram_line'].set_linewidth(0.8)
+                    cursor['histogram_line'].set_alpha(0.6)
+            
+            self.selected_cursor = None
+            
+            if cursor_id is not None:
+                # 找到并选中指定的cursor
+                for cursor in self.cursors:
+                    if cursor['id'] == cursor_id:
+                        cursor['selected'] = True
+                        self.selected_cursor = cursor
+                        
+                        # 加粗显示选中的cursor
+                        if 'line_ax2' in cursor and cursor['line_ax2']:
+                            cursor['line_ax2'].set_linewidth(1.5)
+                            cursor['line_ax2'].set_alpha(0.9)
+                        if 'line_ax3' in cursor and cursor['line_ax3']:
+                            cursor['line_ax3'].set_linewidth(1.5)
+                            cursor['line_ax3'].set_alpha(0.9)
+                        if 'histogram_line' in cursor and cursor['histogram_line']:
+                            cursor['histogram_line'].set_linewidth(1.5)
+                            cursor['histogram_line'].set_alpha(0.9)
+                        
+                        # 发送选中信号
+                        if hasattr(self, 'cursor_selected'):
+                            self.cursor_selected.emit(cursor_id)
+                        
+                        break
+            
+            return True
+            
+        except Exception as e:
+            print(f"Error selecting cursor: {e}")
+            import traceback
+            traceback.print_exc()
+            return False
+    
+    def clear_all_cursors(self):
+        """清除所有cursor"""
+        try:
+            if not hasattr(self, 'cursors'):
+                return True
+                
+            # 移除所有cursor的显示元素
+            for cursor in self.cursors:
+                if 'line_ax2' in cursor and cursor['line_ax2']:
+                    try:
+                        cursor['line_ax2'].remove()
+                    except:
+                        pass
+                if 'line_ax3' in cursor and cursor['line_ax3']:
+                    try:
+                        cursor['line_ax3'].remove()
+                    except:
+                        pass
+                if 'histogram_line' in cursor and cursor['histogram_line']:
+                    try:
+                        cursor['histogram_line'].remove()
+                    except:
+                        pass
+            
+            # 清空列表
+            self.cursors.clear()
+            self.selected_cursor = None
+            self.cursor_counter = 0
+            
+            # 重新绘制
+            self.draw()
+            
+            return True
+            
+        except Exception as e:
+            print(f"Error clearing all cursors: {e}")
+            import traceback
+            traceback.print_exc()
+            return False
     
     def _renumber_fits(self):
         """重新编号拟合项目并更新显示"""
@@ -2614,3 +2851,148 @@ class HistogramPlot(FigureCanvas):
             import traceback
             traceback.print_exc()
             return False
+    
+    def clear_all_cursors(self):
+        """清除所有cursor"""
+        try:
+            if not hasattr(self, 'cursors'):
+                return True
+            
+            # 清除所有cursor的绘图元素
+            for cursor in self.cursors[:]:
+                # 清除ax2中的线
+                if 'line_ax2' in cursor and cursor['line_ax2']:
+                    try:
+                        cursor['line_ax2'].remove()
+                    except:
+                        pass
+                
+                # 清除ax3中的线
+                if 'line_ax3' in cursor and cursor['line_ax3']:
+                    try:
+                        cursor['line_ax3'].remove()
+                    except:
+                        pass
+                
+                # 清除直方图模式中的线
+                if 'histogram_line' in cursor and cursor['histogram_line']:
+                    try:
+                        cursor['histogram_line'].remove()
+                    except:
+                        pass
+            
+            # 清空列表
+            self.cursors.clear()
+            
+            # 重置相关状态
+            self.selected_cursor = None
+            self.cursor_counter = 0
+            
+            # 重绘
+            self.draw()
+            
+            return True
+            
+        except Exception as e:
+            print(f"Error clearing all cursors: {e}")
+            import traceback
+            traceback.print_exc()
+            return False
+    
+    def select_cursor(self, cursor_id):
+        """选中cursor"""
+        try:
+            if not hasattr(self, 'cursors'):
+                return False
+                
+            # 先取消所有cursor的选中状态
+            for cursor in self.cursors:
+                cursor['selected'] = False
+                # 恢复正常线宽
+                for line_key in ['line_ax2', 'line_ax3', 'histogram_line']:
+                    if line_key in cursor and cursor[line_key]:
+                        cursor[line_key].set_linewidth(0.8)
+                        cursor[line_key].set_alpha(0.6)
+            
+            # 设置选中的cursor
+            if cursor_id is not None:
+                for cursor in self.cursors:
+                    if cursor['id'] == cursor_id:
+                        cursor['selected'] = True
+                        self.selected_cursor = cursor
+                        # 高亮选中的cursor
+                        for line_key in ['line_ax2', 'line_ax3', 'histogram_line']:
+                            if line_key in cursor and cursor[line_key]:
+                                cursor[line_key].set_linewidth(1.5)
+                                cursor[line_key].set_alpha(0.9)
+                        break
+            else:
+                self.selected_cursor = None
+            
+            # 重绘
+            self.draw()
+            
+            return True
+            
+        except Exception as e:
+            print(f"Error selecting cursor: {e}")
+            import traceback
+            traceback.print_exc()
+            return False
+    
+    def update_cursor_position(self, cursor_id, new_position):
+        """更新cursor位置"""
+        try:
+            if not hasattr(self, 'cursors'):
+                return False
+                
+            for cursor in self.cursors:
+                if cursor['id'] == cursor_id:
+                    cursor['y_position'] = new_position
+                    
+                    # 更新ax2中的线
+                    if 'line_ax2' in cursor and cursor['line_ax2']:
+                        cursor['line_ax2'].set_ydata([new_position, new_position])
+                    
+                    # 更新ax3中的线
+                    if 'line_ax3' in cursor and cursor['line_ax3']:
+                        cursor['line_ax3'].set_ydata([new_position, new_position])
+                    
+                    # 更新直方图模式中的线
+                    if 'histogram_line' in cursor and cursor['histogram_line']:
+                        # 在直方图模式中，cursor是垂直线
+                        cursor['histogram_line'].set_xdata([new_position, new_position])
+                    
+                    return True
+            
+            return False
+            
+        except Exception as e:
+            print(f"Error updating cursor position: {e}")
+            import traceback
+            traceback.print_exc()
+            return False
+    
+    def get_cursor_info(self):
+        """获取所有cursor的信息"""
+        try:
+            if not hasattr(self, 'cursors'):
+                return []
+                
+            cursor_info = []
+            for cursor in self.cursors:
+                info = {
+                    'id': cursor['id'],
+                    'y_position': cursor['y_position'],
+                    'color': cursor['color'],
+                    'selected': cursor.get('selected', False)
+                }
+                cursor_info.append(info)
+            
+            return cursor_info
+            
+        except Exception as e:
+            print(f"Error getting cursor info: {e}")
+            import traceback
+            traceback.print_exc()
+            return []

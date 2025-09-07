@@ -24,6 +24,7 @@ from .controls import HistogramControlPanel, FileChannelControl
 from .export_tools import ExportToolsPanel, IntegratedDataExporter, ImageClipboardManager, HistogramExporter
 from .fit_info_panel import FitInfoPanel
 from .popup_cursor_manager import PopupCursorManager
+from .cursor_info_panel import CursorInfoPanel
 
 
 class HistogramDialog(QDialog):
@@ -58,37 +59,105 @@ class HistogramDialog(QDialog):
     
     def setup_ui(self):
         """设置用户界面"""
-        # ================ 顶部区域：控制面板 ================
-        top_widget = QWidget()
-        top_layout = QHBoxLayout(top_widget)
-        top_layout.setContentsMargins(5, 5, 5, 5)  # 减小边距
+        # 主布局：水平分割为三个面板
+        main_splitter = QSplitter(Qt.Orientation.Horizontal)
         
-        # 创建文件和通道控制面板
-        self.file_channel_control = FileChannelControl(self)
+        # ================ 左侧面板：Histogram Settings ================
+        self.setup_left_panel()
+        main_splitter.addWidget(self.left_panel)
+        
+        # ================ 中央区域：图表显示 ================
+        self.setup_central_area()
+        main_splitter.addWidget(self.central_area)
+        
+        # ================ 右侧面板：Fit Results & Cursors ================
+        self.setup_right_panel()
+        main_splitter.addWidget(self.right_panel)
+        
+        # 设置分割器比例 (左:中:右 = 280:800:280)
+        main_splitter.setSizes([280, 800, 280])
+        main_splitter.setStretchFactor(0, 0)  # 左侧固定
+        main_splitter.setStretchFactor(1, 1)  # 中央可伸缩
+        main_splitter.setStretchFactor(2, 0)  # 右侧固定
+        
+        # 将分割器添加到主布局
+        self.main_layout.addWidget(main_splitter)
+        
+        # ================ 状态栏 ================
+        self.status_bar = QStatusBar()
+        self.status_bar.showMessage("Ready")
+        self.main_layout.addWidget(self.status_bar)
+        
+        # ================ 初始化弹窗式cursor manager ================
+        self.popup_cursor_manager = PopupCursorManager(self)
+        self.popup_cursor_manager.hide()  # 初始状态为隐藏
+    
+    def setup_left_panel(self):
+        """设置左侧控制面板"""
+        self.left_panel = QGroupBox()
+        self.left_panel.setFixedWidth(280)
+        
+        layout = QVBoxLayout()
+        layout.setContentsMargins(10, 10, 10, 10)
+        layout.setSpacing(15)
+        
+        # Histogram Settings组
+        settings_group = QGroupBox("Histogram Settings")
+        settings_layout = QVBoxLayout()
         
         # 创建直方图控制面板
         self.histogram_control = HistogramControlPanel(self)
+        settings_layout.addWidget(self.histogram_control)
+        
+        settings_group.setLayout(settings_layout)
+        layout.addWidget(settings_group)
+        
+        # File Control组
+        file_group = QGroupBox("File Control")
+        file_layout = QVBoxLayout()
+        
+        # 创建文件和通道控制面板
+        self.file_channel_control = FileChannelControl(self)
+        file_layout.addWidget(self.file_channel_control)
+        
+        file_group.setLayout(file_layout)
+        layout.addWidget(file_group)
+        
+        # Export Tools组
+        export_group = QGroupBox("Export Tools")
+        export_layout = QVBoxLayout()
         
         # 创建导出工具面板
         self.export_tools = ExportToolsPanel(self)
+        export_layout.addWidget(self.export_tools)
         
-        # 添加到顶部布局
-        top_layout.addWidget(self.file_channel_control)
-        top_layout.addWidget(self.histogram_control)
-        top_layout.addWidget(self.export_tools)
+        export_group.setLayout(export_layout)
+        layout.addWidget(export_group)
         
-        # ================ 中间区域：绘图区 ================
+        # 添加伸缩空间
+        layout.addStretch()
+        
+        self.left_panel.setLayout(layout)
+    
+    def setup_central_area(self):
+        """设置中央图表显示区域"""
+        self.central_area = QWidget()
+        
+        layout = QVBoxLayout()
+        layout.setContentsMargins(5, 5, 5, 5)
+        layout.setSpacing(5)
+        
         # 创建标签页控件
         self.tab_widget = QTabWidget()
         
         # 主视图标签页
         self.main_tab = QWidget()
         main_tab_layout = QVBoxLayout(self.main_tab)
-        main_tab_layout.setContentsMargins(5, 0, 5, 0)  # 减小左右边距
+        main_tab_layout.setContentsMargins(0, 0, 0, 0)
         
         # 创建主视图绘图区
-        self.plot_canvas = HistogramPlot(self, width=8, height=6, dpi=100)
-        # 【新增】设置共享拟合数据
+        self.plot_canvas = HistogramPlot(self, width=10, height=8, dpi=100)
+        # 设置共享拟合数据
         self.plot_canvas.set_shared_fit_data(self.shared_fit_data)
         
         self.plot_toolbar = NavigationToolbar(self.plot_canvas, self)
@@ -97,118 +166,192 @@ class HistogramDialog(QDialog):
         main_tab_layout.addWidget(self.plot_toolbar)
         main_tab_layout.addWidget(self.plot_canvas)
         
-        # 在主视图右上角添加cursor manager和拟合曲线控制按钮
-        control_btn_layout = QHBoxLayout()
-        control_btn_layout.addStretch()  # 推到右边
-        
-        # 统一的按钮样式
-        button_style = """
-            QPushButton {
-                background-color: #f5f5f5;
-                border: 1px solid #d0d0d0;
-                border-radius: 4px;
-                font-size: 11px;
-                padding: 4px 8px;
-                color: #333333;
-            }
-            QPushButton:hover {
-                background-color: #e8e8e8;
-                border-color: #b0b0b0;
-            }
-            QPushButton:pressed {
-                background-color: #d4d4d4;
-                border-color: #888888;
-            }
-            QPushButton:checked {
-                background-color: #d4d4d4;
-                border-color: #888888;
-                color: #1976d2;
-            }
-        """
-        
-        # 拟合曲线显示控制按钮
-        self.fit_display_toggle_btn = QPushButton("Fits")
-        self.fit_display_toggle_btn.setFixedSize(65, 28)
-        self.fit_display_toggle_btn.setCheckable(True)
-        self.fit_display_toggle_btn.setChecked(True)  # 默认显示拟合曲线
-        self.fit_display_toggle_btn.setStyleSheet(button_style)
-        self.fit_display_toggle_btn.clicked.connect(self.toggle_fit_display)
-        
-        # Cursor manager按钮
-        self.cursor_toggle_btn = QPushButton("Cursors")
-        self.cursor_toggle_btn.setFixedSize(75, 28)
-        self.cursor_toggle_btn.setStyleSheet(button_style)
-        self.cursor_toggle_btn.clicked.connect(self.toggle_cursor_manager)
-        
-        # 添加按钮到布局
-        control_btn_layout.addWidget(self.fit_display_toggle_btn)
-        control_btn_layout.addWidget(self.cursor_toggle_btn)
-        main_tab_layout.insertLayout(0, control_btn_layout)  # 插入到顶部
-        
-        # Subplot3直方图标签页
+        # Histogram标签页
         self.subplot3_tab = QWidget()
-        subplot3_tab_layout = QHBoxLayout(self.subplot3_tab)  # 使用水平布局来并排直方图和信息面板
-        subplot3_tab_layout.setContentsMargins(5, 0, 5, 0)  # 减小左右边距
-        
-        # 创建一个拆分器来管理直方图和信息面板的布局
-        splitter = QSplitter(Qt.Orientation.Horizontal)
-        
-        # 直方图区域
-        plot_container = QWidget()
-        plot_layout = QVBoxLayout(plot_container)
-        plot_layout.setContentsMargins(0, 0, 0, 0)  # 减小内边距
+        subplot3_tab_layout = QVBoxLayout(self.subplot3_tab)
+        subplot3_tab_layout.setContentsMargins(0, 0, 0, 0)
         
         # 创建 subplot3 直方图绘图区
-        self.subplot3_canvas = HistogramPlot(self, width=8, height=6, dpi=100)
-        # 【新增】设置共享拟合数据
+        self.subplot3_canvas = HistogramPlot(self, width=10, height=8, dpi=100)
+        # 设置共享拟合数据
         self.subplot3_canvas.set_shared_fit_data(self.shared_fit_data)
         
         self.subplot3_toolbar = NavigationToolbar(self.subplot3_canvas, self)
         
-        # 将绘图区添加到直方图容器
-        plot_layout.addWidget(self.subplot3_toolbar)
-        plot_layout.addWidget(self.subplot3_canvas)
-        
-        # 信息面板区域
-        info_container = QWidget()
-        info_layout = QVBoxLayout(info_container)
-        info_layout.setContentsMargins(5, 0, 0, 0)  # 减小内边距
-        
-        # 创建拟合信息面板
-        self.fit_info_panel = FitInfoPanel(self)
-        info_layout.addWidget(self.fit_info_panel)
-        
-
-        
-        # 调试信息
-        print("Fit info panel created")
-        
-        # 添加到拆分器
-        splitter.addWidget(plot_container)
-        splitter.addWidget(info_container)
-        
-        # 设置拆分器初始比例 (70% 直方图, 30% 信息面板)
-        splitter.setSizes([700, 300])
-        
-        # 将拆分器添加到标签页布局
-        subplot3_tab_layout.addWidget(splitter)
+        # 将绘图区添加到Histogram标签页
+        subplot3_tab_layout.addWidget(self.subplot3_toolbar)
+        subplot3_tab_layout.addWidget(self.subplot3_canvas)
         
         # 添加标签页到标签页控件
         self.tab_widget.addTab(self.main_tab, "Main View")
         self.tab_widget.addTab(self.subplot3_tab, "Histogram")
         
-        # ================ 状态栏 ================
-        self.status_bar = QStatusBar()
-        self.status_bar.showMessage("Ready")
+        layout.addWidget(self.tab_widget)
+        self.central_area.setLayout(layout)
+    
+    def setup_right_panel(self):
+        """设置右侧面板"""
+        self.right_panel = QWidget()
+        self.right_panel.setFixedWidth(280)
         
-        # ================ 初始化弹窗式cursor manager ================
-        self.popup_cursor_manager = PopupCursorManager(self)
-        self.popup_cursor_manager.hide()  # 初始状态为隐藏
+        layout = QVBoxLayout()
+        layout.setContentsMargins(10, 10, 10, 10)
+        layout.setSpacing(15)
         
-        # ================ 将各部分添加到主布局 ================
-        self.main_layout.addWidget(top_widget)
-        self.main_layout.addWidget(self.tab_widget, 1)  # 标签页控件占大部分空间
-        self.main_layout.addWidget(self.status_bar)
+        # Fit Results组
+        fit_group = QGroupBox("Fit Results")
+        fit_layout = QVBoxLayout()
+        fit_layout.setSpacing(10)
+        
+        # 创建拟合信息面板
+        self.fit_info_panel = FitInfoPanel(self)
+        fit_layout.addWidget(self.fit_info_panel)
+        
+        # Clear All按钮
+        self.clear_all_btn = QPushButton("Clear All")
+        self.clear_all_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #f44336;
+                color: white;
+                border: none;
+                border-radius: 4px;
+                padding: 8px 16px;
+                font-weight: bold;
+            }
+            QPushButton:hover {
+                background-color: #da190b;
+            }
+            QPushButton:pressed {
+                background-color: #c62828;
+            }
+        """)
+        self.clear_all_btn.clicked.connect(self.on_clear_fits_requested)
+        fit_layout.addWidget(self.clear_all_btn)
+        
+        fit_group.setLayout(fit_layout)
+        layout.addWidget(fit_group)
+        
+        # Cursors组
+        cursors_group = QGroupBox("Cursors")
+        cursors_layout = QVBoxLayout()
+        cursors_layout.setSpacing(5)
+        
+        # 创建 Cursor 信息面板
+        self.cursor_info_panel = CursorInfoPanel(self)
+        cursors_layout.addWidget(self.cursor_info_panel)
+        
+        cursors_group.setLayout(cursors_layout)
+        layout.addWidget(cursors_group)
+        
+        # 添加伸缩空间
+        layout.addStretch()
+        
+        self.right_panel.setLayout(layout)
+    
+    def get_current_canvas(self):
+        """获取当前活动的画布"""
+        current_tab = self.tab_widget.currentIndex()
+        if current_tab == 1:  # Histogram标签页
+            return self.subplot3_canvas
+        else:  # Main View标签页
+            return self.plot_canvas
+    
+    def add_cursor(self):
+        """添加cursor"""
+        try:
+            canvas = self.get_current_canvas()
+            if hasattr(canvas, 'add_cursor'):
+                cursor_id = canvas.add_cursor()
+                if cursor_id is not None:
+                    self.status_bar.showMessage(f"Added cursor {cursor_id}")
+                    # 更新 cursor 信息面板
+                    self.update_cursor_info_panel()
+                else:
+                    self.status_bar.showMessage("Failed to add cursor")
+            else:
+                self.status_bar.showMessage("Cursor functionality not available")
+                
+        except Exception as e:
+            self.status_bar.showMessage(f"Error adding cursor: {str(e)}")
+    
+    def clear_cursors(self):
+        """清除所有cursor"""
+        try:
+            canvas = self.get_current_canvas()
+            if hasattr(canvas, 'clear_all_cursors'):
+                success = canvas.clear_all_cursors()
+                if success:
+                    self.status_bar.showMessage("Cleared all cursors")
+                    # 更新 cursor 信息面板
+                    self.cursor_info_panel.clear_all_cursors()
+                else:
+                    self.status_bar.showMessage("Failed to clear cursors")
+            else:
+                self.status_bar.showMessage("Cursor functionality not available")
+                
+        except Exception as e:
+            self.status_bar.showMessage(f"Error clearing cursors: {str(e)}")
+    
+    def update_cursor_info_panel(self):
+        """更新 cursor 信息面板"""
+        try:
+            canvas = self.get_current_canvas()
+            if canvas and hasattr(canvas, 'get_cursor_info'):
+                cursor_info = canvas.get_cursor_info()
+                self.cursor_info_panel.refresh_cursor_list(cursor_info)
+        except Exception as e:
+            print(f"Error updating cursor info panel: {e}")
+    
+    def delete_cursor(self, cursor_id):
+        """删除指定cursor"""
+        try:
+            canvas = self.get_current_canvas()
+            if hasattr(canvas, 'remove_cursor'):
+                success = canvas.remove_cursor(cursor_id)
+                if success:
+                    self.status_bar.showMessage(f"Deleted cursor {cursor_id}")
+                    self.update_cursor_info_panel()
+                else:
+                    self.status_bar.showMessage(f"Failed to delete cursor {cursor_id}")
+        except Exception as e:
+            self.status_bar.showMessage(f"Error deleting cursor: {str(e)}")
+    
+    def delete_cursors(self, cursor_ids):
+        """删除多个cursor"""
+        try:
+            canvas = self.get_current_canvas()
+            if hasattr(canvas, 'remove_cursor'):
+                success_count = 0
+                for cursor_id in cursor_ids:
+                    if canvas.remove_cursor(cursor_id):
+                        success_count += 1
+                
+                self.status_bar.showMessage(f"Deleted {success_count} cursors")
+                self.update_cursor_info_panel()
+        except Exception as e:
+            self.status_bar.showMessage(f"Error deleting cursors: {str(e)}")
+    
+    def update_cursor_position(self, cursor_id, new_position):
+        """更新cursor位置"""
+        try:
+            canvas = self.get_current_canvas()
+            if hasattr(canvas, 'update_cursor_position'):
+                success = canvas.update_cursor_position(cursor_id, new_position)
+                if success:
+                    canvas.draw()
+                    self.update_cursor_info_panel()
+        except Exception as e:
+            self.status_bar.showMessage(f"Error updating cursor position: {str(e)}")
+    
+    def select_cursor(self, cursor_id):
+        """选中指定cursor"""
+        try:
+            canvas = self.get_current_canvas()
+            if hasattr(canvas, 'select_cursor'):
+                canvas.select_cursor(cursor_id if cursor_id >= 0 else None)
+                self.update_cursor_info_panel()
+        except Exception as e:
+            self.status_bar.showMessage(f"Error selecting cursor: {str(e)}")
     
     def connect_signals(self):
         """连接信号和槽 - 修复版，避免循环调用"""
@@ -252,6 +395,14 @@ class HistogramDialog(QDialog):
             self.fit_info_panel.fit_selected.connect(self.on_fit_selected)
             self.fit_info_panel.copy_all_fits.connect(self.on_copy_fit_info)
             self.fit_info_panel.toggle_fit_labels.connect(self.on_toggle_fit_labels)
+            
+            # 连接 Cursor 信息面板信号
+            self.cursor_info_panel.add_cursor_requested.connect(self.add_cursor)
+            self.cursor_info_panel.clear_cursors_requested.connect(self.clear_cursors)
+            self.cursor_info_panel.cursor_selected.connect(self.select_cursor)
+            self.cursor_info_panel.cursor_deleted.connect(self.delete_cursor)
+            self.cursor_info_panel.cursors_deleted.connect(self.delete_cursors)
+            self.cursor_info_panel.cursor_position_changed.connect(self.update_cursor_position)
             
             # Popup Cursor管理器信号
             self.popup_cursor_manager.cursor_position_changed.connect(self.on_cursor_position_changed)
@@ -345,6 +496,9 @@ class HistogramDialog(QDialog):
                     
                     # 绘制subplot3直方图
                     self.update_subplot3_histogram()
+                    
+                    # 更新 cursor 信息面板
+                    self.update_cursor_info_panel()
             
             # 文件信息摘要
             if isinstance(info, dict):
@@ -505,6 +659,9 @@ class HistogramDialog(QDialog):
             # 更新subplot3直方图
             self.update_subplot3_histogram()
             
+            # 更新 cursor 信息面板
+            self.update_cursor_info_panel()
+            
             self.status_bar.showMessage(f"Selected channel: {channel_name}")
             
         except Exception as e:
@@ -620,6 +777,9 @@ class HistogramDialog(QDialog):
                 # 更新cursor manager的关联
                 if self.popup_cursor_manager.isVisible():
                     self.popup_cursor_manager.set_plot_widget(self.subplot3_canvas)
+                
+                # 更新 cursor 信息面板
+                self.update_cursor_info_panel()
                     
             elif index == 0:  # 切换到主视图标签页
                 # 【新增】同步subplot3的拟合数据到主视图（如果适用）
@@ -635,6 +795,9 @@ class HistogramDialog(QDialog):
                 # 更新cursor manager的关联
                 if self.popup_cursor_manager.isVisible():
                     self.popup_cursor_manager.set_plot_widget(self.plot_canvas)
+                
+                # 更新 cursor 信息面板
+                self.update_cursor_info_panel()
                     
         except Exception as e:
             print(f"Error in tab change: {e}")
@@ -852,6 +1015,8 @@ class HistogramDialog(QDialog):
     def on_cursor_position_changed(self, cursor_id, new_position):
         """处理cursor位置变化"""
         self.status_bar.showMessage(f"Cursor {cursor_id} moved to Y = {new_position:.4f}")
+        # 更新 cursor 信息面板
+        self.update_cursor_info_panel()
         
     def on_cursor_selection_changed(self, cursor_id):
         """处理cursor选择变化"""
@@ -859,6 +1024,8 @@ class HistogramDialog(QDialog):
             self.status_bar.showMessage(f"Selected cursor {cursor_id}")
         else:
             self.status_bar.showMessage("No cursor selected")
+        # 更新 cursor 信息面板
+        self.update_cursor_info_panel()
     
     def on_plot_cursor_selected(self, cursor_id):
         """处理从 plot canvas 发来的 cursor 选中信号 - 修复防护"""
@@ -872,6 +1039,9 @@ class HistogramDialog(QDialog):
             # 更新cursor manager的状态
             if self.popup_cursor_manager.isVisible():
                 self.popup_cursor_manager.update_from_plot()
+            
+            # 更新 cursor 信息面板
+            self.update_cursor_info_panel()
             
             # 更新状态栏显示
             if cursor_id is not None and cursor_id >= 0:
@@ -912,7 +1082,6 @@ class HistogramDialog(QDialog):
         """切换cursor manager面板的显示/隐藏"""
         if self.popup_cursor_manager.isVisible():
             self.popup_cursor_manager.hide()
-            self.cursor_toggle_btn.setText("Cursors")
         else:
             # 根据当前标签页设置cursor manager与正确的plot canvas的关联
             current_tab = self.tab_widget.currentIndex()
@@ -923,7 +1092,6 @@ class HistogramDialog(QDialog):
             
             # 显示弹窗
             self.popup_cursor_manager.show_popup()
-            self.cursor_toggle_btn.setText("Hide")
             
             # 强制激活窗口并获得焦点
             self.popup_cursor_manager.raise_()

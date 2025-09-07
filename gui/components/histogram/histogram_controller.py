@@ -232,7 +232,12 @@ class HistogramController:
     
     def on_highlight_position_changed(self, position_percent):
         """处理高亮区域位置变化"""
-        self.view.plot_canvas.move_highlight(position_percent)
+        if hasattr(self.view.plot_canvas, 'move_highlight'):
+            self.view.plot_canvas.move_highlight(position_percent)
+        else:
+            # 如果move_highlight方法不存在，使用update_highlight_position
+            if hasattr(self.view.plot_canvas, 'update_highlight_position'):
+                self.view.plot_canvas.update_highlight_position(position_percent)
         
         # 更新高亮区域的统计信息
         self._update_highlighted_statistics()

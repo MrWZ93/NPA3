@@ -6,7 +6,7 @@ Histogram Controls - 直方图控制面板
 """
 
 from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel, 
-                           QSpinBox, QSlider, QFormLayout, QGroupBox,
+                           QSpinBox, QSlider, QFormLayout,
                            QPushButton, QDoubleSpinBox, QComboBox, QCheckBox,
                            QSizePolicy)
 from PyQt6.QtCore import Qt, pyqtSignal, QTimer
@@ -57,10 +57,7 @@ class HistogramControlPanel(QWidget):
     
     def setup_ui(self):
         """设置UI组件"""
-        # 直方图设置组
-        hist_group = QGroupBox("Histogram Settings")
-        hist_layout = QVBoxLayout(hist_group)
-        hist_layout.setContentsMargins(5, 5, 5, 5)  # 减小内边距
+        # 直接使用主布局，移除内部的组框以避免重复标题
         
         # Bins设置 - 单独一行
         bins_layout = QHBoxLayout()
@@ -72,7 +69,6 @@ class HistogramControlPanel(QWidget):
         self.bins_spin.setFixedWidth(80)
         bins_layout.addWidget(self.bins_spin)
         bins_layout.addStretch()
-        hist_layout.addLayout(bins_layout)
         
         # 显示选项 - 两行布局
         options_layout1 = QHBoxLayout()
@@ -98,11 +94,6 @@ class HistogramControlPanel(QWidget):
         self.invert_data_check.setToolTip("Invert the data values (multiply by -1)")
         self.invert_data_check.setChecked(False)
         
-        # 清除高斯拟合按钮 - 移动到右侧面板，这里不再添加
-        # self.clear_fits_btn = QPushButton("Clear Fits")
-        # self.clear_fits_btn.setToolTip("Clear all Gaussian fits")
-        # self.clear_fits_btn.setFixedWidth(80)
-        
         # 第一行选项
         options_layout1.addWidget(self.log_x_check)
         options_layout1.addWidget(self.log_y_check)
@@ -113,12 +104,7 @@ class HistogramControlPanel(QWidget):
         options_layout2.addWidget(self.invert_data_check)
         options_layout2.addStretch()
         
-        hist_layout.addLayout(options_layout1)
-        hist_layout.addLayout(options_layout2)
-        
         # 高亮区域设置
-        highlight_layout = QVBoxLayout()
-        
         # 高亮区域大小设置
         size_layout = QHBoxLayout()
         size_layout.addWidget(QLabel("Size:"))
@@ -141,16 +127,14 @@ class HistogramControlPanel(QWidget):
         position_layout.addWidget(self.highlight_position_slider)
         position_layout.addWidget(self.highlight_position_label)
         
-        # 将控件添加到高亮区域布局
-        highlight_layout.addLayout(size_layout)
-        highlight_layout.addLayout(position_layout)
-        
-        # 添加高亮区域布局到直方图设置组
-        hist_layout.addLayout(highlight_layout)
-        
-        # 添加直方图设置组到主布局
-        self.main_layout.addWidget(hist_group)
+        # 添加所有布局到主布局
+        self.main_layout.addLayout(bins_layout)
+        self.main_layout.addLayout(options_layout1)
+        self.main_layout.addLayout(options_layout2)
+        self.main_layout.addLayout(size_layout)
+        self.main_layout.addLayout(position_layout)
         self.main_layout.addStretch(1)  # 添加弹性空间，让控件靠上排列
+
     
     def connect_signals(self):
         """连接信号与槽"""
@@ -280,23 +264,18 @@ class FileChannelControl(QWidget):
     
     def setup_ui(self):
         """设置UI组件"""
-        # 文件选择组
-        file_group = QGroupBox("File Selection")
-        file_layout = QVBoxLayout(file_group)
-        file_layout.setContentsMargins(5, 5, 5, 5)  # 减小内边距
+        # 直接使用主布局，不再添加额外的组框以避免重复标题
         
         # 文件选择按钮和标签
         file_select_layout = QHBoxLayout()
         self.load_file_btn = QPushButton("Load File")
+        self.load_file_btn.setMinimumWidth(80)
         self.file_label = QLabel("No file selected")
         self.file_label.setStyleSheet("color: gray; font-style: italic;")
         file_select_layout.addWidget(self.load_file_btn)
         file_select_layout.addWidget(self.file_label, 1)
         
-        # 通道和采样率水平布局
-        channel_rate_layout = QHBoxLayout()
-        
-        # 通道选择
+        # 通道选择 - 上下排列
         channel_layout = QHBoxLayout()
         channel_layout.addWidget(QLabel("Channel:"))
         self.channel_combo = QComboBox()
@@ -304,7 +283,7 @@ class FileChannelControl(QWidget):
         self.channel_combo.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         channel_layout.addWidget(self.channel_combo)
         
-        # 采样率设置
+        # 采样率设置 - 上下排列
         rate_layout = QHBoxLayout()
         rate_layout.addWidget(QLabel("Rate (Hz):"))
         self.sampling_rate_spin = QDoubleSpinBox()
@@ -315,16 +294,10 @@ class FileChannelControl(QWidget):
         self.sampling_rate_spin.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         rate_layout.addWidget(self.sampling_rate_spin)
         
-        # 添加通道和采样率到水平布局
-        channel_rate_layout.addLayout(channel_layout)
-        channel_rate_layout.addLayout(rate_layout)
-        
-        # 将所有布局添加到文件组
-        file_layout.addLayout(file_select_layout)
-        file_layout.addLayout(channel_rate_layout)
-        
-        # 添加到主布局
-        self.main_layout.addWidget(file_group)
+        # 添加到主布局（上下排列）
+        self.main_layout.addLayout(file_select_layout)
+        self.main_layout.addLayout(channel_layout)
+        self.main_layout.addLayout(rate_layout)
         self.main_layout.addStretch(1)  # 添加弹性空间，让控件靠上排列
     
     def connect_signals(self):

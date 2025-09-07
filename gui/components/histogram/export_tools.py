@@ -12,7 +12,7 @@ import csv
 import json
 from datetime import datetime
 from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QPushButton, 
-                            QFileDialog, QLabel, QGroupBox, QMessageBox, 
+                            QFileDialog, QLabel, QMessageBox, 
                             QApplication, QProgressDialog)
 from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtGui import QIcon, QPixmap, QImage
@@ -21,7 +21,7 @@ from PIL import Image
 from .settings_manager import SettingsManager
 
 
-class ExportToolsPanel(QGroupBox):
+class ExportToolsPanel(QWidget):
     """导出和复制工具面板"""
     
     # 定义信号
@@ -29,14 +29,14 @@ class ExportToolsPanel(QGroupBox):
     copy_image_requested = pyqtSignal()           # 复制图像信号
     
     def __init__(self, parent=None):
-        super(ExportToolsPanel, self).__init__("Export Tools", parent)
+        super(ExportToolsPanel, self).__init__(parent)
         self.setup_ui()
         
     def setup_ui(self):
         """设置UI界面"""
-        # 创建布局
+        # 创建布局，移除组框以避免重复标题
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(5, 10, 5, 5)
+        layout.setContentsMargins(0, 0, 0, 0)  # 移除内边距
         
         # 综合导出按钮
         self.export_comprehensive_btn = QPushButton("Export Histogram Data")
@@ -51,6 +51,7 @@ class ExportToolsPanel(QGroupBox):
         # 添加到布局
         layout.addWidget(self.export_comprehensive_btn)
         layout.addWidget(self.copy_image_btn)
+        layout.addStretch()  # 添加弹性空间
 
 
 class IntegratedDataExporter:

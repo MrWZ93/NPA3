@@ -175,6 +175,14 @@ class HistogramDialog(QDialog):
                 
             elif index == 0:  # 主视图标签页
                 self._sync_cursor_manager_to_canvas(self.plot_canvas)
+                
+                # 在切换回主视图时，更新subplot3中的拟合显示
+                if (hasattr(self, 'plot_canvas') and 
+                    hasattr(self.plot_canvas, '_update_ax3_fit_display')):
+                    print("Updating Main View subplot3 fit display on tab switch")
+                    self.plot_canvas._update_ax3_fit_display()
+                    self.plot_canvas.draw()
+                
                 self.status_bar.showMessage(DialogConfig.STATUS_MESSAGES['main_view'])
                 
             self.update_cursor_info_panel()
@@ -185,17 +193,43 @@ class HistogramDialog(QDialog):
             self._changing_tab = False
     
     def on_clear_fits_requested(self):
-        """清除拟合请求处理"""
+        """清除拟合请求处理 - 增强版"""
+        print("[Dialog] Starting comprehensive fit clearing from clear button...")
+        
+        # 调用控制器的清除方法
         self.controller.on_clear_fits_requested()
-        self.shared_fit_data.clear_fits()
+        
+        # 直接清除共享拟合数据和UI显示
+        if self.shared_fit_data:
+            self.shared_fit_data.clear_fits()
+            
+        # 强制清除Fit Results面板
+        try:
+            if hasattr(self, 'fit_info_panel') and self.fit_info_panel is not None:
+                print("[Dialog] Force clearing fit_info_panel from clear button")
+                # 直接清空列表
+                self.fit_info_panel.fit_list.clear()
+                # 调用正式的清除方法
+                self.fit_info_panel.clear_all_fits()
+                print("[Dialog] Successfully force cleared fit info panel from clear button")
+        except Exception as e:
+            print(f"[Dialog] Error force clearing fit_info_panel from clear button: {e}")
+            
+        # 调用综合清除方法
+        self._clear_shared_fits_on_data_change()
+        
+        print("[Dialog] Comprehensive fit clearing from clear button completed")
     
     def on_region_selected(self, x_min, x_max):
         """区域选择处理"""
         try:
-            if hasattr(self.plot_canvas, 'update_highlighted_plots'):
-                self.plot_canvas.update_highlighted_plots()
-            
+            # 清除拟合数据（因为用户重新选择了高亮区域）
             self._clear_shared_fits_on_data_change()
+            
+            if hasattr(self.plot_canvas, 'update_highlighted_plots'):
+                # 区域选择后更新显示，但不再重复清除拟合
+                self.plot_canvas.update_highlighted_plots(clear_fits=False)
+            
             self._update_subplot3_histogram()
             
             self.status_bar.showMessage(f"Region selected: {x_min:.3f} to {x_max:.3f}")
@@ -382,16 +416,23 @@ class HistogramDialog(QDialog):
     # ================ 工具方法 ================
     
     def _update_subplot3_histogram(self):
-        """更新subplot3直方图 - 简化版"""
+        """更新subplot3直方图 - 简化版，不恢复拟合曲线"""
         if self._updating_subplot3 or not hasattr(self.plot_canvas, 'data') or self.plot_canvas.data is None:
             return
         
         try:
             self._updating_subplot3 = True
+            
+            print("Updating subplot3 histogram without restoring fits")
+            
+            # 更新直方图
             self.controller._update_subplot3_histogram()
             
             # 设置subplot3_canvas的parent_dialog
             self.subplot3_canvas.parent_dialog = self
+            
+            # 不再恢复拟合数据，让用户手动添加新的拟合
+            # 这样可以避免清除后又被意外恢复的问题
             
             # 在Histogram标签页时更新cursor manager关联
             if self.tab_widget.currentIndex() == 1:
@@ -403,10 +444,86 @@ class HistogramDialog(QDialog):
             self._updating_subplot3 = False
     
     def _clear_shared_fits_on_data_change(self):
-        """数据变化时清除共享拟合数据"""
-        if self.shared_fit_data.has_fits():
-            print("Clearing shared fit data due to data region change")
-            self.shared_fit_data.clear_fits()
+        """数据变化时清除共享拟合数据 - 增强版"""
+        print("[Fix] Starting comprehensive fit data clearing...")
+        
+        # 第1步：清除共享拟合数据
+        if hasattr(self, 'shared_fit_data') and self.shared_fit_data:
+            if self.shared_fit_data.has_fits():
+                print(f"[Fix] Clearing shared fit data: {len(self.shared_fit_data.gaussian_fits)} fits")
+                self.shared_fit_data.clear_fits()
+            else:
+                print("[Fix] No fits in shared data to clear")
+        else:
+            print("[Fix] No shared_fit_data found")
+            
+        # 第2步：清除subplot3_canvas中的拟合显示
+        if hasattr(self, 'subplot3_canvas'):
+            try:
+                if hasattr(self.subplot3_canvas, 'clear_fits'):
+                    self.subplot3_canvas.clear_fits()
+                    print("[Fix] Cleared fits from subplot3_canvas")
+                    
+                # 清除subplot3_canvas自身的拟合数据
+                if hasattr(self.subplot3_canvas, 'fitting_manager') and self.subplot3_canvas.fitting_manager:
+                    if hasattr(self.subplot3_canvas.fitting_manager, 'gaussian_fits'):
+                        self.subplot3_canvas.fitting_manager.gaussian_fits.clear()
+                        print("[Fix] Cleared subplot3_canvas fitting_manager gaussian_fits")
+                        
+            except Exception as e:
+                print(f"[Fix] Error clearing subplot3_canvas: {e}")
+                
+        # 第3步：清除主视图subplot3中的拟合线条
+        if hasattr(self, 'plot_canvas'):
+            try:
+                if hasattr(self.plot_canvas, '_ax3_fit_lines') and self.plot_canvas._ax3_fit_lines:
+                    for line in self.plot_canvas._ax3_fit_lines[:]:
+                        try:
+                            if line and line in self.plot_canvas.ax3.lines:
+                                line.remove()
+                        except:
+                            pass
+                    self.plot_canvas._ax3_fit_lines.clear()
+                    print("[Fix] Cleared fits from main view subplot3")
+                    
+                # 清除plot_canvas自身的拟合数据
+                if hasattr(self.plot_canvas, 'fitting_manager') and self.plot_canvas.fitting_manager:
+                    if hasattr(self.plot_canvas.fitting_manager, 'gaussian_fits'):
+                        self.plot_canvas.fitting_manager.gaussian_fits.clear()
+                        print("[Fix] Cleared plot_canvas fitting_manager gaussian_fits")
+                        
+            except Exception as e:
+                print(f"[Fix] Error clearing plot_canvas: {e}")
+                
+        # 第4步：强制清除拟合信息面板
+        try:
+            if hasattr(self, 'fit_info_panel') and self.fit_info_panel is not None:
+                print("[Fix] Force clearing fit_info_panel")
+                # 直接清空列表
+                self.fit_info_panel.fit_list.clear()
+                # 调用正式的清除方法
+                self.fit_info_panel.clear_all_fits()
+                # 显示提示信息
+                self.fit_info_panel.info_label.show()
+                self.fit_info_panel.stats_label.setText("Select a fit to view its details")
+                print("[Fix] Successfully force cleared fit info panel")
+            else:
+                print("[Fix] fit_info_panel not found or is None")
+        except Exception as e:
+            print(f"[Fix] Error force clearing fit_info_panel: {e}")
+            import traceback
+            traceback.print_exc()
+                
+        # 第5步：重绘所有相关的画布
+        try:
+            if hasattr(self, 'subplot3_canvas'):
+                self.subplot3_canvas.draw()
+            if hasattr(self, 'plot_canvas'):
+                self.plot_canvas.draw()
+        except Exception as e:
+            print(f"[Fix] Error redrawing canvases: {e}")
+                
+        print("[Fix] Comprehensive fit data clearing completed")
     
     def _sync_cursor_manager_to_canvas(self, canvas):
         """同步cursor manager到指定画布"""

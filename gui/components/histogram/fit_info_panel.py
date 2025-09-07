@@ -163,22 +163,27 @@ class FitInfoPanel(QWidget):
         
         # 创建布局
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setContentsMargins(2, 2, 2, 2)  # 减少边距
+        layout.setSpacing(4)  # 减少间距
         
-        # 标题
+        # 标题和按钮区域 - 使用紧凑布局
         title_layout = QHBoxLayout()
+        title_layout.setSpacing(4)
+        
         title_label = QLabel("Fit Results")
-        title_label.setStyleSheet("font-weight: bold; font-size: 12px;")
+        title_label.setStyleSheet("font-weight: bold; font-size: 11px;")  # 稍微减小字体
         
         # Copy按钮
         self.copy_btn = QToolButton()
         self.copy_btn.setText("Copy")
         self.copy_btn.setToolTip("Copy all fit data to clipboard")
+        self.copy_btn.setMaximumHeight(20)  # 限制按钮高度
         
         # μσ复制按钮
         self.copy_mu_sigma_btn = QToolButton()
         self.copy_mu_sigma_btn.setText("μσ")
         self.copy_mu_sigma_btn.setToolTip("Copy μ and σ values to clipboard for Excel")
+        self.copy_mu_sigma_btn.setMaximumHeight(20)  # 限制按钮高度
         
         title_layout.addWidget(title_label)
         title_layout.addStretch(1)
@@ -187,34 +192,40 @@ class FitInfoPanel(QWidget):
         
         layout.addLayout(title_layout)
         
-        # 提示信息
+        # 提示信息 - 使用更紧凑的样式
         self.info_label = QLabel("No fits yet. Select regions for Gaussian fitting.")
-        self.info_label.setStyleSheet("color: gray; font-style: italic;")
+        self.info_label.setStyleSheet("color: gray; font-style: italic; font-size: 10px;")  # 减小字体
         self.info_label.setWordWrap(True)
         self.info_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.info_label.setMaximumHeight(30)  # 限制高度
         
         layout.addWidget(self.info_label)
         
-        # 拟合列表
+        # 拟合列表 - 设置适当的最小高度，确保可见性
         self.fit_list = QListWidget()
         self.fit_list.setAlternatingRowColors(True)
         self.fit_list.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
         self.fit_list.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.fit_list.setMinimumHeight(100)  # 设置合适的最小高度
+        self.fit_list.setMaximumHeight(150)  # 设置最大高度，防止占用过多空间
         
-        layout.addWidget(self.fit_list)
+        layout.addWidget(self.fit_list, 2)  # 给列表分配权重
         
-        # 添加按钮区域
+        # 操作按钮区域 - 使用更紧凑的布局
         button_layout = QHBoxLayout()
+        button_layout.setSpacing(4)
         
         # 删除选中项按钮
         self.delete_selected_btn = QPushButton("Delete Selected")
         self.delete_selected_btn.setToolTip("Delete selected fit(s)")
         self.delete_selected_btn.setEnabled(False)  # 初始禁用
+        self.delete_selected_btn.setMaximumHeight(25)  # 限制按钮高度
         
         # 切换拟合标签可见性按钮
         self.toggle_labels_btn = QPushButton("Hide Labels")
         self.toggle_labels_btn.setToolTip("Hide/Show fit labels in the plot")
         self.toggle_labels_btn.setCheckable(True)
+        self.toggle_labels_btn.setMaximumHeight(25)  # 限制按钮高度
         
         # 添加按钮到布局
         button_layout.addWidget(self.delete_selected_btn)
@@ -222,19 +233,30 @@ class FitInfoPanel(QWidget):
         
         layout.addLayout(button_layout)
         
-        # 统计信息区域
+        # 统计信息区域 - 设置合适的最小高度
         self.stats_group = QGroupBox("Statistics")
+        self.stats_group.setStyleSheet("QGroupBox { font-size: 10px; }")  # 减小字体
+        self.stats_group.setMinimumHeight(60)  # 适当减小高度
+        self.stats_group.setMaximumHeight(100)  # 设置最大高度
+        
         stats_layout = QVBoxLayout(self.stats_group)
+        stats_layout.setContentsMargins(4, 4, 4, 4)  # 减少内边距
         
         self.stats_label = QLabel("Select a fit to view its details")
         self.stats_label.setWordWrap(True)
+        self.stats_label.setStyleSheet("font-size: 9px;")  # 减小字体
         stats_layout.addWidget(self.stats_label)
         
-        layout.addWidget(self.stats_group)
+        layout.addWidget(self.stats_group, 1)  # 给统计信息分配权重
         
-        # 隐藏列表和统计信息，直到有拟合结果
-        self.fit_list.hide()
-        self.stats_group.hide()
+        # 确保布局能够适应窗口大小变化
+        layout.addStretch(0)  # 添加最小的伸缩空间
+        
+        # 保持列表和统计信息区域常驻显示，不隐藏
+        # 初始显示提示信息，但不隐藏列表和统计区域
+        self.info_label.show()
+        self.fit_list.show()
+        self.stats_group.show()
         
         # 打印调试信息
         print("Connecting signals in FitInfoPanel")
@@ -261,12 +283,9 @@ class FitInfoPanel(QWidget):
         # 添加到列表
         self.fit_list.addItem(item)
         
-        # 如果是第一个项目，显示列表和统计信息区域
+        # 如果是第一个项目，隐藏提示信息（但保持列表和统计信息可见）
         if self.fit_list.count() == 1:
-            self.info_label.hide()
-            self.fit_list.show()
-            self.stats_group.show()
-            # 不自动选择任何项目，允许所有曲线都不被选中
+            self.info_label.hide()  # 只隐藏提示信息，不隐藏列表
             # 更新统计信息显示为未选择状态
             self.stats_label.setText("No fits selected. All curves have the same thickness.")
         
@@ -327,11 +346,11 @@ class FitInfoPanel(QWidget):
                 # 从列表中移除项目
                 taken_item = self.fit_list.takeItem(i)
                 
-                # 如果列表为空，显示提示信息并隐藏列表和统计区域
+                # 如果列表为空，显示提示信息（但不隐藏列表和统计区域）
                 if self.fit_list.count() == 0:
                     self.info_label.show()
-                    self.fit_list.hide()
-                    self.stats_group.hide()
+                    # 保持列表和统计区域可见，不隐藏
+                    self.stats_label.setText("Select a fit to view its details")
                 
                 print(f"Removed fit {fit_index} from panel")
                 return True
@@ -340,13 +359,24 @@ class FitInfoPanel(QWidget):
         return False
     
     def clear_all_fits(self):
-        """清除所有拟合项目"""
+        """清除所有拟合项目 - 增强版"""
+        print("[FitInfoPanel] Clearing all fits from panel")
+        print(f"[FitInfoPanel] Current fit count before clear: {self.fit_list.count()}")
+        
+        # 清空列表
         self.fit_list.clear()
+        
+        # 显示提示信息
         self.info_label.show()
-        self.fit_list.hide()
-        self.stats_group.hide()
-        # 确保在清除所有拟合后，取消任何高亮状态
+        
+        # 保持列表和统计区域可见，不隐藏
+        self.stats_label.setText("Select a fit to view its details")
+        
+        # 取消任何高亮状态，发送-1表示没有选中任何拟合
         self.fit_selected.emit(-1)
+        
+        print(f"[FitInfoPanel] Fit count after clear: {self.fit_list.count()}")
+        print("[FitInfoPanel] All fits cleared from panel")
     
     def on_selection_changed(self):
         """处理选择变化"""

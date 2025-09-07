@@ -57,13 +57,14 @@ class HistogramUIBuilder:
         status_bar.showMessage("Ready")
         # 限制状态栏高度，避免窗口最大化时过宽
         status_bar.setMaximumHeight(DialogConfig.STATUS_BAR_HEIGHT)
-        status_bar.setStyleSheet("""
-            QStatusBar {
+        status_bar.setStyleSheet(f"""
+            QStatusBar {{
                 border-top: 1px solid #d0d0d0;
-                background-color: #f8f9fa;
+                background-color: {DialogConfig.STATUS_BAR_BACKGROUND};
                 font-size: 11px;
                 padding: 2px 8px;
-            }
+                color: {DialogConfig.STATUS_BAR_TEXT_COLOR};
+            }}
         """)
         self.dialog.main_layout.addWidget(status_bar)
         
@@ -251,16 +252,16 @@ class HistogramUIBuilder:
         layout.setContentsMargins(*DialogConfig.PANEL_MARGINS)
         layout.setSpacing(DialogConfig.PANEL_SPACING)
         
-        # Fit Results组
+        # Fit Results组 - 增加高度分配
         fit_group = self._create_fit_results_group()
-        layout.addWidget(fit_group)
+        layout.addWidget(fit_group, 3)  # 分配权重3
         
-        # Cursors组
+        # Cursors组 - 增加高度分配
         cursor_group = self._create_cursor_control_group()
-        layout.addWidget(cursor_group)
+        layout.addWidget(cursor_group, 2)  # 分配权重2
         
-        # 添加弹性空间
-        layout.addStretch()
+        # 减少弹性空间，让组件占用更多高度
+        layout.addStretch(1)  # 只给少量弹性空间
         
         panel.setLayout(layout)
         return panel

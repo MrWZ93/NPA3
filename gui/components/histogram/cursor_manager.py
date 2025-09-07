@@ -443,17 +443,80 @@ class CursorManager(QObject):
             self.drag_start_y = None
     
     def _find_cursor_near_click(self, event):
-        """查找点击位置附近的cursor"""
-        if not event.ydata:
+        """查找点击位置附近的cursor（优化精度）"""
+        if not event.xdata and not event.ydata:
             return None
         
-        click_tolerance = 0.05  # 点击容忍度
-        
-        for cursor in self.cursors:
-            cursor_y = cursor['y_position']
+        # 动态计算点击容忍度（相对于轴范围的百分比）
+        try:
+            # 判断是否为直方图模式（只有一个ax）
+            is_histogram_mode = (hasattr(self.plot_canvas, 'is_histogram_mode') and 
+                               self.plot_canvas.is_histogram_mode and 
+                               hasattr(self.plot_canvas, 'ax') and 
+                               event.inaxes == self.plot_canvas.ax)
             
-            # 检查点击是否在cursor附近
-            if abs(event.ydata - cursor_y) < click_tolerance:
-                return cursor
+            if is_histogram_mode:
+                # 直方图模式：cursor是垂直线，检查x坐标
+                if not event.xdata:
+                    return None
+                x_min, x_max = self.plot_canvas.ax.get_xlim()
+                range_val = abs(x_max - x_min)
+                click_pos = event.xdata
+                
+                closest_cursor = None
+                closest_distance = float('inf')
+                
+                for cursor in self.cursors:
+                    cursor_pos = cursor['y_position']  # 在直方图中，y_position存储的是x坐标值
+                    distance = abs(click_pos - cursor_pos)
+                    
+                    if distance < closest_distance:
+                        closest_distance = distance
+                        closest_cursor = cursor
+                        
+            else:
+                # 主视图模式：cursor是水平线，检查y坐标
+                if not event.ydata:
+                    return None
+                    
+                if event.inaxes == getattr(self.plot_canvas, 'ax2', None):
+                    y_min, y_max = self.plot_canvas.ax2.get_ylim()
+                elif event.inaxes == getattr(self.plot_canvas, 'ax3', None):
+                    y_min, y_max = self.plot_canvas.ax3.get_ylim()
+                else:
+                    return None
+                
+                range_val = abs(y_max - y_min)
+                click_pos = event.ydata
+                
+                closest_cursor = None
+                closest_distance = float('inf')
+                
+                for cursor in self.cursors:
+                    cursor_pos = cursor['y_position']
+                    distance = abs(click_pos - cursor_pos)
+                    
+                    if distance < closest_distance:
+                        closest_distance = distance
+                        closest_cursor = cursor
+            
+            # 设置为轴范围的2%，更加精确
+            click_tolerance = range_val * 0.02
+            
+            # 设置最小和最大容忍度以防止过小或过大
+            min_tolerance = range_val * 0.005  # 0.5%
+            max_tolerance = range_val * 0.05   # 5%
+            click_tolerance = max(min_tolerance, min(click_tolerance, max_tolerance))
+            
+            # 检查最近的cursor是否在容忍范围内
+            if closest_cursor and closest_distance < click_tolerance:
+                mode = "histogram" if is_histogram_mode else "main view"
+                print(f"Found cursor {closest_cursor['id']} in {mode} at distance {closest_distance:.4f} (tolerance: {click_tolerance:.4f})")
+                return closest_cursor
+            
+        except Exception as e:
+            print(f"Error calculating click tolerance: {e}")
+            import traceback
+            traceback.print_exc()
         
         return None

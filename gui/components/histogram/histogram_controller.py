@@ -48,11 +48,9 @@ class HistogramController:
         
         # 连接拟合信息面板的信号
         if hasattr(self.view, 'fit_info_panel'):
-            self.view.fit_info_panel.fit_selected.connect(self.on_fit_selected)
-            self.view.fit_info_panel.fit_deleted.connect(self.on_fit_deleted)
-            self.view.fit_info_panel.fits_deleted.connect(self.on_fits_deleted)
-            self.view.fit_info_panel.fit_edited.connect(self.on_fit_edited)
-            self.view.fit_info_panel.toggle_fit_labels.connect(self.on_toggle_fit_labels)
+            # 注意：这些信号已经在signal_connector.py中连接了，所以这里不再重复连接
+            # 避免重复连接导致信号被触发多次
+            pass
         
         # 暗色模式和导出功能
         if hasattr(self.view.histogram_control, 'dark_mode_changed'):
@@ -227,6 +225,9 @@ class HistogramController:
         # 更新高亮区域的统计信息
         self._update_highlighted_statistics()
         
+        # 清除拟合数据（因为高亮区域变化了）
+        self.view._clear_shared_fits_on_data_change()
+        
         # 更新subplot3直方图
         self._update_subplot3_histogram()
     
@@ -241,6 +242,9 @@ class HistogramController:
         
         # 更新高亮区域的统计信息
         self._update_highlighted_statistics()
+        
+        # 清除拟合数据（因为高亮区域变化了）
+        self.view._clear_shared_fits_on_data_change()
         
         # 更新subplot3直方图
         self._update_subplot3_histogram()
@@ -369,15 +373,51 @@ class HistogramController:
             self.view.status_bar.showMessage("Histogram view: Click and drag to select regions for Gaussian fitting")
     
     def on_clear_fits_requested(self):
-        """处理清除高斯拟合请求"""
+        """处理清除高斯拟合请求 - 增强版"""
+        print("[Controller] Starting comprehensive fit clearing...")
+        
+        # 清除subplot3_canvas中的拟合
         if hasattr(self.view, 'subplot3_canvas') and hasattr(self.view.subplot3_canvas, 'clear_fits'):
             self.view.subplot3_canvas.clear_fits()
-            self.view.status_bar.showMessage("Cleared all Gaussian fits")
+            
+        # 清除共享拟合数据
+        if hasattr(self.view, 'shared_fit_data') and self.view.shared_fit_data:
+            self.view.shared_fit_data.clear_fits()
+            
+        # 强制清除Fit Results面板
+        try:
+            if hasattr(self.view, 'fit_info_panel') and self.view.fit_info_panel is not None:
+                print("[Controller] Force clearing fit_info_panel")
+                # 直接清空列表
+                self.view.fit_info_panel.fit_list.clear()
+                # 调用正式的清除方法
+                self.view.fit_info_panel.clear_all_fits()
+                print("[Controller] Successfully force cleared fit info panel")
+        except Exception as e:
+            print(f"[Controller] Error force clearing fit_info_panel: {e}")
+            
+        # 调用视图的综合清除方法
+        if hasattr(self.view, '_clear_shared_fits_on_data_change'):
+            self.view._clear_shared_fits_on_data_change()
+            
+        self.view.status_bar.showMessage("Cleared all Gaussian fits")
+        print("[Controller] Comprehensive fit clearing completed")
             
     def on_fit_selected(self, fit_index):
         """处理拟合项被选中"""
-        if hasattr(self.view, 'subplot3_canvas') and hasattr(self.view.subplot3_canvas, 'highlight_specific_fit'):
-            self.view.subplot3_canvas.highlight_specific_fit(fit_index)
+        # 在当前活动的画布中高亮显示拟合曲线
+        current_canvas = self.view.get_current_canvas()
+        if hasattr(current_canvas, 'highlight_fit'):
+            current_canvas.highlight_fit(fit_index)
+            
+        # 也在subplot3_canvas中高亮显示（如果存在）
+        if hasattr(self.view, 'subplot3_canvas') and hasattr(self.view.subplot3_canvas, 'highlight_fit'):
+            self.view.subplot3_canvas.highlight_fit(fit_index)
+            
+        if fit_index > 0:
+            self.view.status_bar.showMessage(f"Selected fit {fit_index}")
+        else:
+            self.view.status_bar.showMessage("No fit selected")
             
     def on_fit_deleted(self, fit_index):
         """处理单个拟合项被删除"""

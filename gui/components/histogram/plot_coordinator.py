@@ -41,6 +41,9 @@ class HistogramPlot(BasePlot):
         
         # 初始化ax3拟合线条跟踪
         self._ax3_fit_lines = []
+        
+        # 添加右键菜单功能
+        self._setup_context_menu()
     
     def _connect_manager_signals(self):
         """连接各管理器的信号 - 添加防护"""
@@ -69,6 +72,40 @@ class HistogramPlot(BasePlot):
             finally:
                 self.guard.set_signal_emitting("cursor_selected_forward", False)
     
+    def _setup_context_menu(self):
+        """设置右键菜单功能"""
+        from PyQt6.QtWidgets import QMenu
+        from PyQt6.QtGui import QAction
+        
+        # 连接右键事件
+        self.mpl_connect('button_press_event', self._on_right_click)
+    
+    def _on_right_click(self, event):
+        """处理右键点击事件"""
+        if event.button == 3:  # 右键
+            # 只在Main View模式下处理右键菜单
+            if not self.is_histogram_mode:
+                # 检查是否在ax2或ax3中点击
+                if event.inaxes == self.ax2 or event.inaxes == self.ax3:
+                    # 直接添加cursor，无需弹出菜单
+                    self._add_cursor_at_position_directly(event)
+    
+    def _add_cursor_at_position_directly(self, event):
+        """直接在点击位置添加cursor（无菜单）"""
+        try:
+            # 计算Y位置（使用点击位置）
+            y_position = event.ydata if event.ydata is not None else 0
+            
+            cursor_id = self.add_cursor(y_position)
+            if cursor_id is not None:
+                print(f"Added cursor at position {y_position:.4f}")
+                # 可以发送信号通知父组件
+                if hasattr(self.parent_dialog, 'update_cursor_info_panel'):
+                    self.parent_dialog.update_cursor_info_panel()
+        except Exception as e:
+            print(f"Error adding cursor: {e}")
+    
+
     def set_shared_fit_data(self, shared_fit_data):
         """设置共享的拟合数据引用"""
         self.shared_fit_data = shared_fit_data
@@ -146,6 +183,10 @@ class HistogramPlot(BasePlot):
     def toggle_fit_labels(self, visible):
         """切换拟合标签可见性"""
         self.fitting_manager.toggle_fit_labels(visible)
+    
+    def highlight_fit(self, fit_index):
+        """高亮显示特定的拟合曲线（加粗）"""
+        self.fitting_manager.highlight_fit(fit_index)
     
     # =================== 直方图模式方法 ===================
     
@@ -247,13 +288,13 @@ class HistogramPlot(BasePlot):
             import traceback
             traceback.print_exc()
     
-    def update_highlighted_plots(self):
+    def update_highlighted_plots(self, clear_fits=False):
         """更新高亮区域和直方图 - 增强版，支持拟合同步"""
         if self.data is None:
             return
 
-        # 先清空拟合数据（如果数据区域变化）
-        if self.shared_fit_data and self.shared_fit_data.has_fits():
+        # 只在明确要求清除时才清空拟合数据（如高亮区域变化）
+        if clear_fits and self.shared_fit_data and self.shared_fit_data.has_fits():
             print("[Fix] Clearing shared fit data from update_highlighted_plots")
             self.shared_fit_data.clear_fits()
 
@@ -296,11 +337,13 @@ class HistogramPlot(BasePlot):
                 self.shared_fit_data is not None and 
                 self.shared_fit_data.has_fits()):
                 
+                print(f"Displaying fits in Main View subplot3")
+                
                 # 获取拟合数据
                 fits, regions = self.shared_fit_data.get_fits()
                 
                 # 在ax3中绘制拟合曲线
-                for fit_data in fits:
+                for i, fit_data in enumerate(fits):
                     if not fit_data or 'popt' not in fit_data:
                         continue
                         
@@ -328,7 +371,7 @@ class HistogramPlot(BasePlot):
                         line, = self.ax3.plot(y_fit, x_fit, '-', linewidth=1.0, color=color, zorder=15)
                         self._ax3_fit_lines.append(line)
                         
-                        print(f"Applied fit to subplot3: color={color}, range={x_range}")
+                        print(f"Applied fit {i+1} to subplot3: color={color}, range={x_range}")
                 
                 # 确保轴范围能显示所有拟合曲线
                 if self._ax3_fit_lines:
@@ -344,6 +387,13 @@ class HistogramPlot(BasePlot):
                             print(f"Extended ax3 y-axis range to [{new_ymin:.4f}, {new_ymax:.4f}] to show all fits")
                 
                 print(f"Applied {len(fits)} fits to subplot3 in main view, displayed {len(self._ax3_fit_lines)} lines")
+            else:
+                if highlighted_data is None:
+                    print("No highlighted data available for subplot3 fit display")
+                elif not hasattr(self, 'ax3'):
+                    print("No ax3 available for fit display")
+                elif self.shared_fit_data is None or not self.shared_fit_data.has_fits():
+                    print("No shared fit data available for subplot3 display")
                 
         except Exception as e:
             print(f"Error applying fits to subplot3 in main view: {e}")
@@ -366,8 +416,15 @@ class HistogramPlot(BasePlot):
         
         # 先清空拟合数据（数据区域变化）
         if self.shared_fit_data and self.shared_fit_data.has_fits():
-            print("[Fix] Clearing shared fit data from move_highlight")
+            print("[move_highlight] Clearing shared fit data due to highlight position change")
             self.shared_fit_data.clear_fits()
+            
+            # 通知父组件清除相关显示
+            if hasattr(self, 'parent_dialog') and self.parent_dialog:
+                if hasattr(self.parent_dialog, '_clear_shared_fits_on_data_change'):
+                    # 使用父组件的清除方法确保完整清除
+                    print("[move_highlight] Calling parent dialog clear method")
+                    self.parent_dialog._clear_shared_fits_on_data_change()
         
         self._validate_highlight_indices()
         
@@ -399,8 +456,8 @@ class HistogramPlot(BasePlot):
             alpha=0.3, color='yellow'
         )
         
-        # 更新子图2和子图3
-        self.update_highlighted_plots()
+        # 更新子图2和子图3（不清除拟合，因为已经在上面清除了）
+        self.update_highlighted_plots(clear_fits=False)
         self.guard.throttled_draw(self)
     
     def immediate_sync_to_main_view(self):

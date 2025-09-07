@@ -35,14 +35,18 @@ class FitDataManager:
     
     def has_fits(self):
         """检查是否有拟合结果"""
-        return len(self.gaussian_fits) > 0
+        has_fits = len(self.gaussian_fits) > 0
+        print(f"[FitDataManager] has_fits() = {has_fits}, fit count = {len(self.gaussian_fits)}")
+        return has_fits
     
     def clear_fits(self):
         """清除所有拟合结果"""
+        print(f"[FitDataManager] Clearing {len(self.gaussian_fits)} fits")
         self.gaussian_fits.clear()
         self.fit_regions.clear()
         self.data_range = None
         self.data_hash = None
+        print("[FitDataManager] All fits cleared")
     
     def is_compatible_with_data(self, data_range, data_hash):
         """检查拟合结果是否与当前数据兼容"""
@@ -264,10 +268,30 @@ class FittingManager(QObject):
             
             # 删除所有拟合曲线和文本
             for fit in self.gaussian_fits:
-                if 'line' in fit and fit['line'] in self.plot_canvas.ax.lines:
-                    fit['line'].remove()
-                if 'text' in fit:
-                    fit['text'].remove()
+                if 'line' in fit and fit['line']:
+                    try:
+                        if fit['line'] in self.plot_canvas.ax.lines:
+                            fit['line'].remove()
+                    except Exception as e:
+                        print(f"Error removing line: {e}")
+                        try:
+                            fit['line'].set_visible(False)
+                        except:
+                            pass
+                
+                if 'text' in fit and fit['text']:
+                    try:
+                        if hasattr(self.plot_canvas.ax, 'texts') and fit['text'] in self.plot_canvas.ax.texts:
+                            fit['text'].remove()
+                        else:
+                            fit['text'].set_visible(False)
+                    except Exception as e:
+                        print(f"Error removing text: {e}")
+                        try:
+                            fit['text'].set_visible(False)
+                        except Exception as e2:
+                            print(f"Error hiding text: {e2}")
+                            pass
             
             self.gaussian_fits.clear()
             
@@ -304,42 +328,61 @@ class FittingManager(QObject):
         """删除特定的拟合"""
         try:
             if not self.gaussian_fits:
+                print("No fits to delete")
                 return False
             
-            # 查找对应的拟合项
-            target_index = -1
-            for i, fit in enumerate(self.gaussian_fits):
-                if (i + 1) == fit_index:
-                    target_index = i
-                    break
+            # 直接使用索引匹配（fit_index从1开始，数组索引从0开始）
+            target_index = fit_index - 1
             
-            if target_index == -1:
-                print(f"Could not find fit with index {fit_index}")
+            # 检查索引是否有效
+            if target_index < 0 or target_index >= len(self.gaussian_fits):
+                print(f"Invalid fit index {fit_index}, valid range: 1-{len(self.gaussian_fits)}")
                 return False
             
             fit = self.gaussian_fits[target_index]
+            print(f"Deleting fit {fit_index} (array index {target_index})")
             
-            # 从图中移除元素
-            if 'line' in fit and fit['line'] in self.plot_canvas.ax.lines:
-                fit['line'].remove()
-            if 'text' in fit:
-                fit['text'].remove()
+            # 安全从图中移除元素
+            if 'line' in fit and fit['line']:
+                try:
+                    if fit['line'] in self.plot_canvas.ax.lines:
+                        fit['line'].remove()
+                except Exception as e:
+                    print(f"Error removing line: {e}")
+                    try:
+                        fit['line'].set_visible(False)
+                    except:
+                        pass
+            
+            if 'text' in fit and fit['text']:
+                try:
+                    if hasattr(self.plot_canvas.ax, 'texts') and fit['text'] in self.plot_canvas.ax.texts:
+                        fit['text'].remove()
+                    else:
+                        fit['text'].set_visible(False)
+                except Exception as e:
+                    print(f"Error removing text: {e}")
+                    try:
+                        fit['text'].set_visible(False)
+                    except Exception as e2:
+                        print(f"Error hiding text: {e2}")
+                        pass
             
             # 移除相关的区域高亮
             if target_index < len(self.fit_regions):
-                _, _, region = self.fit_regions[target_index]
-                if region in self.plot_canvas.ax.patches:
-                    region.remove()
+                try:
+                    _, _, region = self.fit_regions[target_index]
+                    if region and hasattr(self.plot_canvas.ax, 'patches') and region in self.plot_canvas.ax.patches:
+                        region.remove()
+                except Exception as e:
+                    print(f"Error removing region: {e}")
                 self.fit_regions.pop(target_index)
             
             # 从列表中移除
             self.gaussian_fits.pop(target_index)
             
-            # 重新编号剩余的拟合
-            self._renumber_fits()
-            
-            # 更新拟合信息字符串
-            self.update_fit_info_string()
+            # 重新编号剩余的拟合并更新拟合信息面板
+            self._renumber_fits_and_update_panel()
             
             # 重置高亮索引
             if self.highlighted_fit_index >= len(self.gaussian_fits):
@@ -359,6 +402,7 @@ class FittingManager(QObject):
             # 重新绘制
             self.plot_canvas.draw()
             
+            print(f"Successfully deleted fit {fit_index}, {len(self.gaussian_fits)} fits remaining")
             return True
             
         except Exception as e:
@@ -374,8 +418,60 @@ class FittingManager(QObject):
             fit_num = i + 1
             new_text = f"G{fit_num}: μ={mu:.3f}, σ={sigma:.3f}"
             
-            if 'text' in fit:
-                fit['text'].set_text(new_text)
+            if 'text' in fit and fit['text']:
+                try:
+                    fit['text'].set_text(new_text)
+                except Exception as e:
+                    print(f"Error updating text for fit {fit_num}: {e}")
+                    try:
+                        fit['text'].set_visible(False)
+                    except:
+                        pass
+    
+    def _renumber_fits_and_update_panel(self):
+        """重新编号拟合并更新信息面板"""
+        print(f"Renumbering {len(self.gaussian_fits)} remaining fits and updating panel")
+        
+        # 首先清空拟合信息面板
+        if (hasattr(self.plot_canvas, 'parent_dialog') and 
+            self.plot_canvas.parent_dialog and 
+            hasattr(self.plot_canvas.parent_dialog, 'fit_info_panel')):
+            
+            self.plot_canvas.parent_dialog.fit_info_panel.clear_all_fits()
+            print("Cleared fit info panel")
+        
+        # 重新编号并重新添加所有拟合到信息面板
+        for i, fit in enumerate(self.gaussian_fits):
+            amp, mu, sigma = fit['popt']
+            fit_num = i + 1
+            x_range = fit['x_range']
+            color = fit['color']
+            
+            # 更新文本标签
+            new_text = f"G{fit_num}: μ={mu:.3f}, σ={sigma:.3f}"
+            if 'text' in fit and fit['text']:
+                try:
+                    fit['text'].set_text(new_text)
+                except Exception as e:
+                    print(f"Error updating text for fit {fit_num}: {e}")
+                    try:
+                        fit['text'].set_visible(False)
+                    except:
+                        pass
+            
+            # 重新添加到信息面板
+            if (hasattr(self.plot_canvas, 'parent_dialog') and 
+                self.plot_canvas.parent_dialog and 
+                hasattr(self.plot_canvas.parent_dialog, 'fit_info_panel')):
+                
+                self.plot_canvas.parent_dialog.fit_info_panel.add_fit(
+                    fit_num, amp, mu, sigma, x_range, color
+                )
+                print(f"Re-added fit {fit_num} to panel")
+        
+        # 更新拟合信息字符串
+        self.update_fit_info_string()
+        print("Renumbering and panel update completed")
     
     def update_fit_info_string(self):
         """更新拟合信息字符串"""
@@ -452,22 +548,29 @@ class FittingManager(QObject):
     def restore_fits_from_shared_data(self):
         """从共享数据恢复拟合结果"""
         if self.shared_fit_data is None or not self.shared_fit_data.has_fits():
+            print("No shared fit data to restore")
             return False
             
         try:
-            # 检查数据兼容性
+            # 检查数据兼容性（放宽检查条件）
             data_hash = self._calculate_data_hash()
-            if not self.shared_fit_data.is_compatible_with_data(None, data_hash):
-                print("Shared fit data is not compatible with current data")
-                return False
+            if data_hash is None:
+                print("Cannot calculate data hash for compatibility check")
+                # 放宽检查，允许恢复
             
             # 获取共享的拟合数据
             fits, regions = self.shared_fit_data.get_fits()
             
+            if not fits:
+                print("No fits found in shared data")
+                return False
+            
+            print(f"Restoring {len(fits)} fits from shared data")
+            
             # 应用到当前图表
             self.apply_fits_to_plot(fits, regions)
             
-            print(f"Restored {len(fits)} fits from shared data")
+            print(f"Successfully restored {len(fits)} fits from shared data")
             return True
             
         except Exception as e:
@@ -567,14 +670,42 @@ class FittingManager(QObject):
         """清除现有的拟合绘图对象"""
         try:
             for fit in self.gaussian_fits:
-                if 'line' in fit and fit['line'] and fit['line'] in self.plot_canvas.ax.lines:
-                    fit['line'].remove()
+                if 'line' in fit and fit['line']:
+                    try:
+                        if fit['line'] in self.plot_canvas.ax.lines:
+                            fit['line'].remove()
+                    except Exception as e:
+                        print(f"Error removing line: {e}")
+                        try:
+                            fit['line'].set_visible(False)
+                        except:
+                            pass
+                
                 if 'text' in fit and fit['text']:
-                    fit['text'].remove()
+                    try:
+                        if hasattr(self.plot_canvas.ax, 'texts') and fit['text'] in self.plot_canvas.ax.texts:
+                            fit['text'].remove()
+                        else:
+                            fit['text'].set_visible(False)
+                    except Exception as e:
+                        print(f"Error removing text: {e}")
+                        try:
+                            fit['text'].set_visible(False)
+                        except Exception as e2:
+                            print(f"Error hiding text: {e2}")
+                            pass
             
             for region_data in self.fit_regions:
-                if len(region_data) >= 3 and region_data[2] and region_data[2] in self.plot_canvas.ax.patches:
-                    region_data[2].remove()
+                if len(region_data) >= 3 and region_data[2]:
+                    try:
+                        if region_data[2] in self.plot_canvas.ax.patches:
+                            region_data[2].remove()
+                    except Exception as e:
+                        print(f"Error removing region: {e}")
+                        try:
+                            region_data[2].set_visible(False)
+                        except:
+                            pass
                         
         except Exception as e:
             print(f"Error clearing existing fits: {e}")
@@ -586,6 +717,51 @@ class FittingManager(QObject):
         if hasattr(self.plot_canvas, 'histogram_data') and self.plot_canvas.histogram_data is not None:
             return DataHasher.calculate_data_hash(self.plot_canvas.histogram_data)
         return None
+    
+    def highlight_fit(self, fit_index):
+        """高亮显示特定的拟合曲线（加粗）"""
+        try:
+            # 首先重置所有曲线的粗细
+            for fit in self.gaussian_fits:
+                if 'line' in fit and fit['line']:
+                    try:
+                        fit['line'].set_linewidth(1.0)  # 默认粗细
+                    except:
+                        pass
+                        
+            # 如果fit_index为-1或无效，只重置所有曲线
+            if fit_index <= 0:
+                self.plot_canvas.draw()
+                return
+            
+            # 直接使用索引匹配（fit_index从1开始，数组索引从0开始）
+            target_index = fit_index - 1
+            
+            # 检查索引是否有效
+            if target_index < 0 or target_index >= len(self.gaussian_fits):
+                print(f"Invalid fit index {fit_index}, valid range: 1-{len(self.gaussian_fits)}")
+                self.plot_canvas.draw()
+                return
+            
+            # 获取目标拟合并高亮显示
+            target_fit = self.gaussian_fits[target_index]
+            
+            if 'line' in target_fit and target_fit['line']:
+                try:
+                    target_fit['line'].set_linewidth(3.0)  # 加粗显示
+                    print(f"Highlighted fit {fit_index} (index {target_index}) with bold line")
+                except Exception as e:
+                    print(f"Error highlighting fit line: {e}")
+            else:
+                print(f"No line found for fit {fit_index}")
+            
+            # 重绘图表
+            self.plot_canvas.draw()
+            
+        except Exception as e:
+            print(f"Error highlighting fit {fit_index}: {e}")
+            import traceback
+            traceback.print_exc()
     
     def toggle_fit_labels(self, visible):
         """切换拟合标签可见性"""

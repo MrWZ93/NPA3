@@ -88,13 +88,13 @@ class CursorInfoPanel(QWidget):
         
         layout.addLayout(button_layout)
         
-        # Cursor列表
+        # Cursor列表 - 增加高度
         self.cursor_list = QListWidget()
         self.cursor_list.setSelectionMode(QListWidget.SelectionMode.ExtendedSelection)  # 支持多选
         self.cursor_list.itemSelectionChanged.connect(self.on_selection_changed)
         self.cursor_list.itemClicked.connect(self.on_cursor_item_clicked)
-        self.cursor_list.setMinimumHeight(120)
-        self.cursor_list.setMaximumHeight(200)
+        self.cursor_list.setMinimumHeight(150)  # 增加最小高度
+        self.cursor_list.setMaximumHeight(300)  # 增加最大高度
         self.cursor_list.setStyleSheet("""
             QListWidget {
                 border: 1px solid #cccccc;

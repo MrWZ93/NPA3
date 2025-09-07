@@ -50,6 +50,8 @@ class DialogConfig:
     
     # 状态栏配置
     STATUS_BAR_HEIGHT = 24
+    STATUS_BAR_BACKGROUND = "rgb(44, 62, 80)"  # 改为Main window一致的颜色
+    STATUS_BAR_TEXT_COLOR = "white"  # 改为白色字体
     
     # 状态消息
     STATUS_MESSAGES = {

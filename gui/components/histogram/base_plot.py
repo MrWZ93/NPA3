@@ -445,8 +445,25 @@ class BasePlot(FigureCanvas):
                 alpha=0.3, color='yellow'
             )
             
-            # 更新子图2和子图3
-            self.update_highlighted_plots()
+            # 清除拟合数据（因为选择了新的高亮区域）
+            if hasattr(self, 'shared_fit_data') and self.shared_fit_data and self.shared_fit_data.has_fits():
+                print("[Fix] Clearing shared fit data due to region selection")
+                self.shared_fit_data.clear_fits()
+                
+                # 通知父组件清除相关显示
+                if hasattr(self, 'parent_dialog') and self.parent_dialog:
+                    if hasattr(self.parent_dialog, '_clear_shared_fits_on_data_change'):
+                        print("[Fix] Calling parent dialog clear method from region selection")
+                        self.parent_dialog._clear_shared_fits_on_data_change()
+            
+            # 更新子图2和子图3（传递clear_fits=True以确保清除拟合显示）
+            if hasattr(self, 'update_highlighted_plots'):
+                # 检查是否有clear_fits参数支持
+                import inspect
+                if 'clear_fits' in inspect.signature(self.update_highlighted_plots).parameters:
+                    self.update_highlighted_plots(clear_fits=True)
+                else:
+                    self.update_highlighted_plots()
             
             self.guard.throttled_draw(self)
             
@@ -555,6 +572,17 @@ class BasePlot(FigureCanvas):
         self.highlight_min = new_min
         self.highlight_max = new_max
         
+        # 清除拟合数据（因为高亮区域大小变化了）
+        if hasattr(self, 'shared_fit_data') and self.shared_fit_data and self.shared_fit_data.has_fits():
+            print("[Fix] Clearing shared fit data due to highlight size change")
+            self.shared_fit_data.clear_fits()
+            
+            # 通知父组件清除相关显示
+            if hasattr(self, 'parent_dialog') and self.parent_dialog:
+                if hasattr(self.parent_dialog, '_clear_shared_fits_on_data_change'):
+                    print("[Fix] Calling parent dialog clear method from highlight size change")
+                    self.parent_dialog._clear_shared_fits_on_data_change()
+        
         if self.highlight_region:
             self.highlight_region.remove()
         
@@ -565,7 +593,15 @@ class BasePlot(FigureCanvas):
             alpha=0.3, color='yellow'
         )
         
-        self.update_highlighted_plots()
+        # 更新高亮区域显示（传递clear_fits=True以确保清除拟合显示）
+        if hasattr(self, 'update_highlighted_plots'):
+            # 检查是否有clear_fits参数支持
+            import inspect
+            if 'clear_fits' in inspect.signature(self.update_highlighted_plots).parameters:
+                self.update_highlighted_plots(clear_fits=True)
+            else:
+                self.update_highlighted_plots()
+        
         self.guard.throttled_draw(self)
     
     def _check_log_scale_validity(self):

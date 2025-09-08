@@ -229,7 +229,7 @@ class HistogramController:
         self.view._clear_shared_fits_on_data_change()
         
         # 更新subplot3直方图
-        self._update_subplot3_histogram()
+        self._update_subplot3_histogram(restore_fits=False)
     
     def on_highlight_position_changed(self, position_percent):
         """处理高亮区域位置变化"""
@@ -247,27 +247,27 @@ class HistogramController:
         self.view._clear_shared_fits_on_data_change()
         
         # 更新subplot3直方图
-        self._update_subplot3_histogram()
+        self._update_subplot3_histogram(restore_fits=False)
     
     def on_log_x_changed(self, enabled):
         """处理X轴对数显示变化"""
         self.view.plot_canvas.set_log_x(enabled)
         # 更新subplot3直方图
-        self._update_subplot3_histogram()
+        self._update_subplot3_histogram(restore_fits=False)
         self.view.status_bar.showMessage(f"X-axis logarithmic scale: {'enabled' if enabled else 'disabled'}")
     
     def on_log_y_changed(self, enabled):
         """处理Y轴对数显示变化"""
         self.view.plot_canvas.set_log_y(enabled)
         # 更新subplot3直方图
-        self._update_subplot3_histogram()
+        self._update_subplot3_histogram(restore_fits=False)
         self.view.status_bar.showMessage(f"Y-axis logarithmic scale: {'enabled' if enabled else 'disabled'}")
     
     def on_kde_changed(self, enabled):
         """处理KDE曲线显示变化"""
         self.view.plot_canvas.set_kde(enabled)
         # 更新subplot3直方图
-        self._update_subplot3_histogram()
+        self._update_subplot3_histogram(restore_fits=False)
         self.view.status_bar.showMessage(f"Kernel Density Estimation: {'enabled' if enabled else 'disabled'}")
     
     def on_invert_data_changed(self, enabled):
@@ -317,7 +317,7 @@ class HistogramController:
                 status_bar=self.view.status_bar
             )
     
-    def _update_subplot3_histogram(self):
+    def _update_subplot3_histogram(self, restore_fits=False):
         """更新subplot3直方图视图"""
         if not hasattr(self.view, 'subplot3_canvas') or self.view.subplot3_canvas is None:
             return
@@ -367,8 +367,8 @@ class HistogramController:
     def on_tab_changed(self, index):
         """处理标签页切换"""
         if index == 1:  # 切换到直方图标签页
-            # 确保subplot3直方图是最新的
-            self._update_subplot3_histogram()
+            # 确保subplot3直方图是最新的，并且恢复拟合曲线
+            self._update_subplot3_histogram(restore_fits=True)
             # 显示提示信息
             self.view.status_bar.showMessage("Histogram view: Click and drag to select regions for Gaussian fitting")
     

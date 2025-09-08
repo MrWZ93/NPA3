@@ -548,33 +548,33 @@ class FittingManager(QObject):
     def restore_fits_from_shared_data(self):
         """从共享数据恢复拟合结果"""
         if self.shared_fit_data is None or not self.shared_fit_data.has_fits():
-            print("No shared fit data to restore")
+            print("[Restore] No shared fit data to restore")
             return False
             
         try:
             # 检查数据兼容性（放宽检查条件）
             data_hash = self._calculate_data_hash()
             if data_hash is None:
-                print("Cannot calculate data hash for compatibility check")
+                print("[Restore] Cannot calculate data hash for compatibility check")
                 # 放宽检查，允许恢复
             
             # 获取共享的拟合数据
             fits, regions = self.shared_fit_data.get_fits()
             
             if not fits:
-                print("No fits found in shared data")
+                print("[Restore] No fits found in shared data")
                 return False
             
-            print(f"Restoring {len(fits)} fits from shared data")
+            print(f"[Restore] Restoring {len(fits)} fits from shared data")
             
             # 应用到当前图表
             self.apply_fits_to_plot(fits, regions)
             
-            print(f"Successfully restored {len(fits)} fits from shared data")
+            print(f"[Restore] Successfully restored {len(fits)} fits from shared data")
             return True
             
         except Exception as e:
-            print(f"Error restoring fits from shared data: {e}")
+            print(f"[Restore] Error restoring fits from shared data: {e}")
             import traceback
             traceback.print_exc()
             return False
@@ -582,6 +582,8 @@ class FittingManager(QObject):
     def apply_fits_to_plot(self, fits, regions):
         """将拟合结果应用到当前图表"""
         try:
+            print(f"[Restore] Applying {len(fits)} fits to plot")
+            
             # 清除现有的拟合
             self._clear_existing_fits()
             
@@ -592,12 +594,14 @@ class FittingManager(QObject):
             # 应用每个拟合
             for i, fit_data in enumerate(fits):
                 if not fit_data or 'popt' not in fit_data:
+                    print(f"[Restore] Skipping invalid fit data at index {i}")
                     continue
                     
                 popt = fit_data['popt']
                 x_range = fit_data['x_range']
                 color = fit_data['color']
                 
+                print(f"[Restore] Drawing fit {i+1}: mu={popt[1]:.3f}, sigma={popt[2]:.3f}, color={color}")
                 # 绘制拟合曲线
                 self._draw_fit_curve(popt, x_range, color, i + 1)
                 
@@ -606,6 +610,7 @@ class FittingManager(QObject):
                 self.plot_canvas.parent_dialog and 
                 hasattr(self.plot_canvas.parent_dialog, 'fit_info_panel')):
                 
+                print(f"[Restore] Updating fit info panel with {len(fits)} fits")
                 self.plot_canvas.parent_dialog.fit_info_panel.clear_all_fits()
                 for i, fit_data in enumerate(fits):
                     if fit_data and 'popt' in fit_data:
@@ -613,12 +618,16 @@ class FittingManager(QObject):
                         self.plot_canvas.parent_dialog.fit_info_panel.add_fit(
                             i + 1, amp, mu, sigma, fit_data['x_range'], fit_data['color']
                         )
+                        print(f"[Restore] Added fit {i+1} to info panel")
+            else:
+                print("[Restore] fit_info_panel not available for update")
             
             # 更新拟合信息字符串
             self.update_fit_info_string()
+            print(f"[Restore] Updated fit info string")
                 
         except Exception as e:
-            print(f"Error applying fits to plot: {e}")
+            print(f"[Restore] Error applying fits to plot: {e}")
             import traceback
             traceback.print_exc()
     

@@ -128,7 +128,7 @@ class HistogramDialog(QDialog):
     def on_bins_changed(self, bins):
         """直方图箱数变化处理"""
         self.controller.on_bins_changed(bins)
-        self._update_subplot3_histogram()
+        self._update_subplot3_histogram(restore_fits=False)
     
     def on_highlight_size_changed(self, size_percent):
         """高亮区域大小变化处理"""
@@ -161,7 +161,7 @@ class HistogramDialog(QDialog):
         self.controller.on_invert_data_changed(enabled)
     
     def on_tab_changed(self, index):
-        """标签页切换处理 - 优化版"""
+        """标签页切换处理 - 优化版，支持拟合恢复"""
         if self._changing_tab:
             return
             
@@ -169,7 +169,8 @@ class HistogramDialog(QDialog):
             self._changing_tab = True
             
             if index == 1:  # 直方图标签页
-                self._update_subplot3_histogram()
+                # 切换到直方图时，如果有拟合数据则恢复
+                self._update_subplot3_histogram(restore_fits=True)
                 self._sync_cursor_manager_to_canvas(self.subplot3_canvas)
                 self.status_bar.showMessage(DialogConfig.STATUS_MESSAGES['histogram_view'])
                 
@@ -230,7 +231,7 @@ class HistogramDialog(QDialog):
                 # 区域选择后更新显示，但不再重复清除拟合
                 self.plot_canvas.update_highlighted_plots(clear_fits=False)
             
-            self._update_subplot3_histogram()
+            self._update_subplot3_histogram(restore_fits=False)
             
             self.status_bar.showMessage(f"Region selected: {x_min:.3f} to {x_max:.3f}")
             
@@ -415,15 +416,15 @@ class HistogramDialog(QDialog):
     
     # ================ 工具方法 ================
     
-    def _update_subplot3_histogram(self):
-        """更新subplot3直方图 - 简化版，不恢复拟合曲线"""
+    def _update_subplot3_histogram(self, restore_fits=True):
+        """更新subplot3直方图 - 支持拟合曲线恢复"""
         if self._updating_subplot3 or not hasattr(self.plot_canvas, 'data') or self.plot_canvas.data is None:
             return
         
         try:
             self._updating_subplot3 = True
             
-            print("Updating subplot3 histogram without restoring fits")
+            print(f"Updating subplot3 histogram, restore_fits={restore_fits}")
             
             # 更新直方图
             self.controller._update_subplot3_histogram()
@@ -431,8 +432,12 @@ class HistogramDialog(QDialog):
             # 设置subplot3_canvas的parent_dialog
             self.subplot3_canvas.parent_dialog = self
             
-            # 不再恢复拟合数据，让用户手动添加新的拟合
-            # 这样可以避免清除后又被意外恢复的问题
+            # 根据参数决定是否恢复拟合数据
+            if restore_fits and hasattr(self, 'shared_fit_data') and self.shared_fit_data and self.shared_fit_data.has_fits():
+                print(f"Restoring {len(self.shared_fit_data.gaussian_fits)} fits to subplot3")
+                # 延迟恢复拟合，确保直方图已经绘制完成
+                from PyQt6.QtCore import QTimer
+                QTimer.singleShot(50, self._restore_fits_to_subplot3)
             
             # 在Histogram标签页时更新cursor manager关联
             if self.tab_widget.currentIndex() == 1:
@@ -524,6 +529,35 @@ class HistogramDialog(QDialog):
             print(f"[Fix] Error redrawing canvases: {e}")
                 
         print("[Fix] Comprehensive fit data clearing completed")
+    
+    def _restore_fits_to_subplot3(self):
+        """恢复拟合曲线到subplot3"""
+        try:
+            if not hasattr(self, 'subplot3_canvas') or not hasattr(self, 'shared_fit_data'):
+                return
+                
+            if not self.shared_fit_data or not self.shared_fit_data.has_fits():
+                print("No shared fit data to restore to subplot3")
+                return
+                
+            print(f"Restoring {len(self.shared_fit_data.gaussian_fits)} fits to subplot3")
+            
+            # 调用subplot3_canvas的恢复方法
+            if hasattr(self.subplot3_canvas, 'restore_fits_from_shared_data'):
+                success = self.subplot3_canvas.restore_fits_from_shared_data()
+                if success:
+                    print("Successfully restored fits to subplot3")
+                    # 更新绘图
+                    self.subplot3_canvas.draw()
+                else:
+                    print("Failed to restore fits to subplot3")
+            else:
+                print("subplot3_canvas does not support restore_fits_from_shared_data")
+                
+        except Exception as e:
+            print(f"Error restoring fits to subplot3: {e}")
+            import traceback
+            traceback.print_exc()
     
     def _sync_cursor_manager_to_canvas(self, canvas):
         """同步cursor manager到指定画布"""

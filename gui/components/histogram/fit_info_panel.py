@@ -178,12 +178,14 @@ class FitInfoPanel(QWidget):
         self.copy_btn.setText("Copy")
         self.copy_btn.setToolTip("Copy all fit data to clipboard")
         self.copy_btn.setMaximumHeight(20)  # 限制按钮高度
+        self.copy_btn.setStyleSheet("QToolButton { font-size: 9px; padding: 2px; }")
         
         # μσ复制按钮
         self.copy_mu_sigma_btn = QToolButton()
         self.copy_mu_sigma_btn.setText("μσ")
         self.copy_mu_sigma_btn.setToolTip("Copy μ and σ values to clipboard for Excel")
         self.copy_mu_sigma_btn.setMaximumHeight(20)  # 限制按钮高度
+        self.copy_mu_sigma_btn.setStyleSheet("QToolButton { font-size: 9px; padding: 2px; }")
         
         title_layout.addWidget(title_label)
         title_layout.addStretch(1)
@@ -220,12 +222,14 @@ class FitInfoPanel(QWidget):
         self.delete_selected_btn.setToolTip("Delete selected fit(s)")
         self.delete_selected_btn.setEnabled(False)  # 初始禁用
         self.delete_selected_btn.setMaximumHeight(25)  # 限制按钮高度
+        self.delete_selected_btn.setStyleSheet("QPushButton { font-size: 9px; padding: 2px; }")
         
         # 切换拟合标签可见性按钮
         self.toggle_labels_btn = QPushButton("Hide Labels")
         self.toggle_labels_btn.setToolTip("Hide/Show fit labels in the plot")
         self.toggle_labels_btn.setCheckable(True)
         self.toggle_labels_btn.setMaximumHeight(25)  # 限制按钮高度
+        self.toggle_labels_btn.setStyleSheet("QPushButton { font-size: 9px; padding: 2px; }")
         
         # 添加按钮到布局
         button_layout.addWidget(self.delete_selected_btn)

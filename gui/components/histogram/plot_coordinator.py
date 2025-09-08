@@ -162,6 +162,18 @@ class HistogramPlot(BasePlot):
         """在直方图模式下刷新cursor"""
         self.cursor_manager.refresh_cursors_for_histogram_mode()
     
+    def set_cursors_visible(self, visible):
+        """设置cursor可见性"""
+        return self.cursor_manager.set_cursors_visible(visible)
+    
+    def toggle_cursors_visibility(self):
+        """切换cursor可见性"""
+        return self.cursor_manager.toggle_cursors_visibility()
+    
+    def get_cursors_visible(self):
+        """获取cursor可见性状态"""
+        return self.cursor_manager.get_cursors_visible()
+    
     # =================== 拟合功能代理方法 ===================
     
     def clear_fits(self):
@@ -477,6 +489,14 @@ class HistogramPlot(BasePlot):
         """设置cursors列表 - 兼容性属性"""
         if hasattr(self.cursor_manager, 'cursors'):
             self.cursor_manager.cursors = value
+            # 同步更新选中状态
+            if hasattr(self.cursor_manager, 'selected_cursor'):
+                selected_cursor = None
+                for cursor in value:
+                    if cursor.get('selected', False):
+                        selected_cursor = cursor
+                        break
+                self.cursor_manager.selected_cursor = selected_cursor
     
     @property
     def cursor_counter(self):
@@ -499,6 +519,10 @@ class HistogramPlot(BasePlot):
         """设置选中的cursor - 兼容性属性"""
         if hasattr(self.cursor_manager, 'selected_cursor'):
             self.cursor_manager.selected_cursor = value
+            # 同步更新cursor列表中的选中状态
+            if hasattr(self.cursor_manager, 'cursors'):
+                for cursor in self.cursor_manager.cursors:
+                    cursor['selected'] = (cursor == value)
     
     @property
     def gaussian_fits(self):

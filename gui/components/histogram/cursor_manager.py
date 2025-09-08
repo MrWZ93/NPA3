@@ -29,6 +29,9 @@ class CursorManager(QObject):
         self.drag_start_y = None
         self.cursor_counter = 0
         
+        # 添加cursor可见性控制
+        self.cursors_visible = True
+        
         # 连接鼠标事件
         self.plot_canvas.mpl_connect('button_press_event', self.on_cursor_mouse_press)
         self.plot_canvas.mpl_connect('motion_notify_event', self.on_cursor_mouse_move)
@@ -67,23 +70,26 @@ class CursorManager(QObject):
             if hasattr(self.plot_canvas, 'ax2'):
                 line_ax2 = self.plot_canvas.ax2.axhline(y=y_position, color=color, 
                                           linestyle='--', linewidth=0.8, 
-                                          alpha=0.6, zorder=20)
+                                          alpha=0.6, zorder=20,
+                                          visible=self.cursors_visible)
             
             # 在Fig3中创建横向线
             line_ax3 = None
             if hasattr(self.plot_canvas, 'ax3'):
                 line_ax3 = self.plot_canvas.ax3.axhline(y=y_position, color=color, 
                                           linestyle='--', linewidth=0.8, 
-                                          alpha=0.6, zorder=20)
+                                          alpha=0.6, zorder=20,
+                                          visible=self.cursors_visible)
             
-            # 创建cursor对象
+            # 创建cursor对象（在histogram模式下不创建可视化线）
             cursor = {
                 'id': cursor_id,
                 'y_position': y_position,
                 'color': color,
                 'line_ax2': line_ax2,
                 'line_ax3': line_ax3,
-                'selected': False
+                'selected': False,
+                'histogram_line': None  # 在histogram模式下不创建可视化cursor
             }
             
             self.cursors.append(cursor)
@@ -102,6 +108,48 @@ class CursorManager(QObject):
             return None
         finally:
             self.guard.set_updating("add_cursor", False)
+    
+    def set_cursors_visible(self, visible):
+        """设置cursor的可见性"""
+        try:
+            self.cursors_visible = visible
+            
+            # 更新所有cursor的可见性
+            for cursor in self.cursors:
+                # 更新ax2中的线
+                if 'line_ax2' in cursor and cursor['line_ax2']:
+                    cursor['line_ax2'].set_visible(visible)
+                
+                # 更新ax3中的线
+                if 'line_ax3' in cursor and cursor['line_ax3']:
+                    cursor['line_ax3'].set_visible(visible)
+                
+                # 在直方图模式下不显示cursor，无论可见性设置如何
+                if 'histogram_line' in cursor and cursor['histogram_line']:
+                    cursor['histogram_line'].set_visible(False)  # 在histogram模式下总是隐藏
+            
+            # 重绘
+            if not self.guard.is_updating("draw"):
+                self.plot_canvas.draw()
+            
+            print(f"Set cursors visibility to: {visible}")
+            return True
+            
+        except Exception as e:
+            print(f"Error setting cursor visibility: {e}")
+            import traceback
+            traceback.print_exc()
+            return False
+    
+    def toggle_cursors_visibility(self):
+        """切换cursor的可见性"""
+        new_visibility = not self.cursors_visible
+        success = self.set_cursors_visible(new_visibility)
+        return new_visibility if success else self.cursors_visible
+    
+    def get_cursors_visible(self):
+        """获取cursor的可见性状态"""
+        return self.cursors_visible
     
     def remove_cursor(self, cursor_id):
         """删除指定的cursor"""
@@ -290,79 +338,133 @@ class CursorManager(QObject):
             return []
     
     def refresh_cursors_after_plot_update(self):
-        """在主视图plot更新后刷新cursor显示"""
+        """在主视图plot更新后刷新cursor显示 - 彻底清理旧线条"""
         try:
+            # 添加防护，避免重复调用
+            if self.guard.is_updating("refresh_cursors_after_plot_update"):
+                return
+                
+            self.guard.set_updating("refresh_cursors_after_plot_update", True)
+            
+            # 第0步：使用强制清理方法彻底清理所有cursor线条
+            self._clear_all_cursor_lines_from_axes()
+            
+            # 第1步：重新创建所有cursor线条
             for cursor in self.cursors:
                 y_pos = cursor['y_position']
                 color = cursor['color']
+                is_selected = cursor.get('selected', False)
                 
-                # 重新创建ax2中的线
+                # 在ax2中创建新线条
                 if hasattr(self.plot_canvas, 'ax2'):
-                    if 'line_ax2' in cursor and cursor['line_ax2']:
-                        try:
-                            cursor['line_ax2'].remove()
-                        except:
-                            pass
-                    
                     cursor['line_ax2'] = self.plot_canvas.ax2.axhline(
                         y=y_pos, color=color, 
-                        linestyle='--', linewidth=0.8, 
-                        alpha=0.6, zorder=20
+                        linestyle='--', linewidth=1.5 if is_selected else 0.8, 
+                        alpha=0.9 if is_selected else 0.6, zorder=20,
+                        visible=self.cursors_visible
                     )
                 
-                # 重新创建ax3中的线
+                # 在ax3中创建新线条
                 if hasattr(self.plot_canvas, 'ax3'):
-                    if 'line_ax3' in cursor and cursor['line_ax3']:
-                        try:
-                            cursor['line_ax3'].remove()
-                        except:
-                            pass
-                    
                     cursor['line_ax3'] = self.plot_canvas.ax3.axhline(
                         y=y_pos, color=color, 
-                        linestyle='--', linewidth=0.8, 
-                        alpha=0.6, zorder=20
+                        linestyle='--', linewidth=1.5 if is_selected else 0.8, 
+                        alpha=0.9 if is_selected else 0.6, zorder=20,
+                        visible=self.cursors_visible
                     )
-                
-                # 如果是选中的cursor，加粗显示
-                if cursor.get('selected', False):
-                    for line_key in ['line_ax2', 'line_ax3']:
-                        if line_key in cursor and cursor[line_key]:
-                            cursor[line_key].set_linewidth(1.5)
-                            cursor[line_key].set_alpha(0.9)
-                            
+            
+            print(f"Refreshed {len(self.cursors)} cursors after plot update (completely rebuilt)")
+                    
         except Exception as e:
             print(f"Error refreshing cursors after plot update: {e}")
             import traceback
             traceback.print_exc()
+        finally:
+            self.guard.set_updating("refresh_cursors_after_plot_update", False)
+    
+    def _clear_all_cursor_lines_from_axes(self):
+        """彻底清理axes中所有cursor线条 - 强制清理方法"""
+        try:
+            print("Starting complete cursor line cleanup...")
+            
+            # 清理ax2中的所有虚线
+            if hasattr(self.plot_canvas, 'ax2') and hasattr(self.plot_canvas.ax2, 'lines'):
+                lines_before = len(self.plot_canvas.ax2.lines)
+                # 使用更强制的方式：直接遍历并移除所有虚线
+                lines_to_remove = []
+                for line in self.plot_canvas.ax2.lines:
+                    if (hasattr(line, 'get_linestyle') and 
+                        line.get_linestyle() in ['--', 'dashed'] and
+                        hasattr(line, 'get_zorder') and 
+                        line.get_zorder() >= 20):  # cursor线条通常有高zorder
+                        lines_to_remove.append(line)
+                
+                for line in lines_to_remove:
+                    try:
+                        line.remove()
+                    except:
+                        pass
+                
+                # 直接操作lines列表
+                self.plot_canvas.ax2.lines = [line for line in self.plot_canvas.ax2.lines 
+                                              if line not in lines_to_remove]
+                
+                lines_after = len(self.plot_canvas.ax2.lines)
+                print(f"ax2: Removed {lines_before - lines_after} cursor lines")
+            
+            # 清理ax3中的所有虚线
+            if hasattr(self.plot_canvas, 'ax3') and hasattr(self.plot_canvas.ax3, 'lines'):
+                lines_before = len(self.plot_canvas.ax3.lines)
+                # 使用更强制的方式：直接遍历并移除所有虚线
+                lines_to_remove = []
+                for line in self.plot_canvas.ax3.lines:
+                    if (hasattr(line, 'get_linestyle') and 
+                        line.get_linestyle() in ['--', 'dashed'] and
+                        hasattr(line, 'get_zorder') and 
+                        line.get_zorder() >= 20):  # cursor线条通常有高zorder
+                        lines_to_remove.append(line)
+                
+                for line in lines_to_remove:
+                    try:
+                        line.remove()
+                    except:
+                        pass
+                
+                # 直接操作lines列表
+                self.plot_canvas.ax3.lines = [line for line in self.plot_canvas.ax3.lines 
+                                              if line not in lines_to_remove]
+                
+                lines_after = len(self.plot_canvas.ax3.lines)
+                print(f"ax3: Removed {lines_before - lines_after} cursor lines")
+            
+            # 清理cursor对象中的所有线条引用
+            for cursor in self.cursors:
+                cursor['line_ax2'] = None
+                cursor['line_ax3'] = None
+                cursor['histogram_line'] = None
+            
+            print("Complete cursor line cleanup finished")
+            
+        except Exception as e:
+            print(f"Error in complete cursor line cleanup: {e}")
+            import traceback
+            traceback.print_exc()
     
     def refresh_cursors_for_histogram_mode(self):
-        """在直方图模式下刷新cursor显示"""
+        """在直方图模式下刷新cursor显示 - 修改为不显示cursor但保留数据"""
         try:
             for cursor in self.cursors:
-                y_pos = cursor['y_position']
-                color = cursor['color']
+                # 移除之前的线（如果存在）
+                if 'histogram_line' in cursor and cursor['histogram_line']:
+                    try:
+                        cursor['histogram_line'].remove()
+                    except:
+                        pass
+                    cursor['histogram_line'] = None
                 
-                # 在直方图模式下，cursor显示为垂直线
-                if hasattr(self.plot_canvas, 'ax'):
-                    # 移除之前的线
-                    if 'histogram_line' in cursor and cursor['histogram_line']:
-                        try:
-                            cursor['histogram_line'].remove()
-                        except:
-                            pass
-                    
-                    # 创建新的垂直线
-                    cursor['histogram_line'] = self.plot_canvas.ax.axvline(
-                        x=y_pos, color=color, 
-                        linestyle='--', linewidth=0.8, 
-                        alpha=0.6, zorder=20
-                    )
-                    
-                    # 如果是选中的cursor，加粗显示
-                    if cursor.get('selected', False):
-                        cursor['histogram_line'].set_linewidth(1.5)
-                        cursor['histogram_line'].set_alpha(0.9)
+                # 在直方图模式下不创建可视化cursor，只保留数据
+                # 这样cursor list中的信息会保留，但不会在histogram中显示
+                print(f"Cursor {cursor['id']} data preserved in histogram mode but not displayed")
                         
         except Exception as e:
             print(f"Error refreshing cursors for histogram mode: {e}")
@@ -397,8 +499,16 @@ class CursorManager(QObject):
         print(f"Reordered cursors: {[c['id'] for c in cursors_sorted]}")
     
     def on_cursor_mouse_press(self, event):
-        """处理鼠标按下事件 - 添加防护"""
+        """处理鼠标按下事件 - 添加防护，在histogram模式下不响应"""
         if not event.inaxes or self.guard.is_updating("mouse_press"):
+            return
+        
+        # 在histogram模式下不响应cursor点击，因为cursor不可见
+        if (hasattr(self.plot_canvas, 'is_histogram_mode') and 
+            self.plot_canvas.is_histogram_mode and 
+            hasattr(self.plot_canvas, 'ax') and 
+            event.inaxes == self.plot_canvas.ax):
+            print("Cursor interaction disabled in histogram mode")
             return
         
         try:
@@ -422,8 +532,15 @@ class CursorManager(QObject):
             self.guard.set_updating("mouse_press", False)
     
     def on_cursor_mouse_move(self, event):
-        """处理鼠标移动事件"""
+        """处理鼠标移动事件 - 在histogram模式下不响应"""
         if not self.dragging or not self.selected_cursor or not event.inaxes:
+            return
+        
+        # 在histogram模式下不响应cursor拖拽，因为cursor不可见
+        if (hasattr(self.plot_canvas, 'is_histogram_mode') and 
+            self.plot_canvas.is_histogram_mode and 
+            hasattr(self.plot_canvas, 'ax') and 
+            event.inaxes == self.plot_canvas.ax):
             return
         
         try:

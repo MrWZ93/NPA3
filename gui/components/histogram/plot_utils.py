@@ -187,23 +187,24 @@ class ColorManager:
     """颜色管理工具类"""
     
     @staticmethod
-    def get_cursor_colors():
-        """获取cursor颜色列表"""
+    def get_unified_colors():
+        """获取统一的颜色列表（cursor和拟合曲线使用相同顺序）"""
         return ['red', 'blue', 'green', 'purple', 'orange', 'brown', 'pink', 'gray', 'olive', 'cyan']
     
     @staticmethod
+    def get_cursor_colors():
+        """获取cursor颜色列表（与拟合曲线保持一致）"""
+        return ColorManager.get_unified_colors()
+    
+    @staticmethod
     def get_fit_colors():
-        """获取拟合曲线颜色列表"""
-        return ['red', 'blue', 'purple', 'orange', 'green', 'magenta', 'cyan', 'brown', 'olive', 'teal']
+        """获取拟合曲线颜色列表（与 cursor 保持一致）"""
+        return ColorManager.get_unified_colors()
     
     @staticmethod
     def get_color_by_index(index, color_type='cursor'):
-        """根据索引获取颜色"""
-        if color_type == 'cursor':
-            colors = ColorManager.get_cursor_colors()
-        else:
-            colors = ColorManager.get_fit_colors()
-        
+        """根据索引获取颜色（现在cursor和拟合曲线使用相同顺序）"""
+        colors = ColorManager.get_unified_colors()
         return colors[index % len(colors)]
 
 

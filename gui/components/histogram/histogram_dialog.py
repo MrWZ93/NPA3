@@ -17,7 +17,7 @@ from .ui_builder import HistogramUIBuilder
 from .signal_connector import HistogramSignalConnector, DialogEventHandler
 from .histogram_controller import HistogramController
 from .export_tools import IntegratedDataExporter, ImageClipboardManager, HistogramExporter
-from .popup_cursor_manager import PopupCursorManager
+# from .popup_cursor_manager import PopupCursorManager  # 不再需要，功能已集成到cursor_info_panel
 from .dialog_config import DialogConfig, UITexts
 
 
@@ -68,9 +68,9 @@ class HistogramDialog(QDialog):
         self.ui_builder = HistogramUIBuilder(self)
         self.main_splitter = self.ui_builder.build_main_layout()
         
-        # 初始化弹窗cursor管理器
-        self.popup_cursor_manager = PopupCursorManager(self)
-        self.popup_cursor_manager.hide()
+        # 初始化弹窗cursor管理器 - 不再需要，功能已集成到cursor_info_panel
+        # self.popup_cursor_manager = PopupCursorManager(self)
+        # self.popup_cursor_manager.hide()
         
         # 设置画布的共享拟合数据
         self.plot_canvas.set_shared_fit_data(self.shared_fit_data)
@@ -89,8 +89,12 @@ class HistogramDialog(QDialog):
         self.tab_widget.currentChanged.connect(self.controller.on_tab_changed)
         self.tab_widget.currentChanged.connect(self.on_tab_changed)
         
-        # 初始化cursor manager与plot canvas的关联
-        self.popup_cursor_manager.set_plot_widget(self.plot_canvas)
+        # 初始化cursor manager与plot canvas的关联 - 不再需要
+        # self.popup_cursor_manager.set_plot_widget(self.plot_canvas)
+        
+        # 连接cursor可见性切换信号
+        if hasattr(self, 'cursor_info_panel'):
+            self.cursor_info_panel.toggle_cursors_visibility_requested.connect(self.on_toggle_cursors_visibility)
     
     # ================ 核心业务方法 ================
     
@@ -172,7 +176,30 @@ class HistogramDialog(QDialog):
                 # 切换到直方图时，如果有拟合数据则恢复
                 self._update_subplot3_histogram(restore_fits=True)
                 self._sync_cursor_manager_to_canvas(self.subplot3_canvas)
+                
+                # 同步cursor可见性状态到subplot3_canvas
+                if hasattr(self.plot_canvas, 'get_cursors_visible') and hasattr(self.subplot3_canvas, 'set_cursors_visible'):
+                    visibility = self.plot_canvas.get_cursors_visible()
+                    self.subplot3_canvas.set_cursors_visible(visibility)
+                    # 更新按钮文本
+                    if hasattr(self, 'cursor_info_panel'):
+                        self.cursor_info_panel.update_visibility_button_text(visibility)
+                    # if hasattr(self.popup_cursor_manager, 'toggle_visibility_btn'):
+                    #     self.popup_cursor_manager.toggle_visibility_btn.setText("Hide" if visibility else "Show")
+                
                 self.status_bar.showMessage(DialogConfig.STATUS_MESSAGES['histogram_view'])
+                
+                # 在切换到histogram tab后，立即更新cursor info panel
+                if hasattr(self, 'cursor_info_panel'):
+                    # 调试输出：检查cursor数据是否正确传递
+                    current_canvas = self.get_current_canvas()
+                    if hasattr(current_canvas, 'cursors'):
+                        print(f"[DEBUG] Switching to histogram tab, found {len(current_canvas.cursors)} cursors")
+                    
+                    # 在histogram tab中禁用Position Control（因为cursor不可见）
+                    self.cursor_info_panel.update_position_label_for_tab(is_histogram_tab=True)
+                    
+                    self.update_cursor_info_panel()
                 
             elif index == 0:  # 主视图标签页
                 self._sync_cursor_manager_to_canvas(self.plot_canvas)
@@ -186,7 +213,15 @@ class HistogramDialog(QDialog):
                 
                 self.status_bar.showMessage(DialogConfig.STATUS_MESSAGES['main_view'])
                 
-            self.update_cursor_info_panel()
+                # 在切换到主视图后，也更新cursor info panel
+                if hasattr(self, 'cursor_info_panel'):
+                    # 恢复Position Control的正常功能
+                    self.cursor_info_panel.update_position_label_for_tab(is_histogram_tab=False)
+                    
+                    self.update_cursor_info_panel()
+                
+            # 不在tab切换时更新cursor info panel，避免不必要的刷新
+            # self.update_cursor_info_panel()
                 
         except Exception as e:
             print(f"Error in tab change: {e}")
@@ -307,7 +342,9 @@ class HistogramDialog(QDialog):
             canvas = self.get_current_canvas()
             if canvas and hasattr(canvas, 'get_cursor_info'):
                 cursor_info = canvas.get_cursor_info()
-                self.cursor_info_panel.refresh_cursor_list(cursor_info)
+                # 在tab切换时强制更新，忽略跳过标志
+                force_update = True
+                self.cursor_info_panel.refresh_cursor_list(cursor_info, force_update)
         except Exception as e:
             print(f"Error updating cursor info panel: {e}")
     
@@ -341,7 +378,8 @@ class HistogramDialog(QDialog):
             self.update_cursor_info_panel()
     
     def on_cursor_position_changed(self, cursor_id, new_position):
-        """Cursor位置变化处理"""
+        """处理Cursor位置变化 - 统一显示Y坐标"""
+        # 统一显示Y坐标，因为histogram中不显示cursor
         self.status_bar.showMessage(f"Cursor {cursor_id} moved to Y = {new_position:.4f}")
         self.update_cursor_info_panel()
         
@@ -359,8 +397,8 @@ class HistogramDialog(QDialog):
         try:
             self._handling_cursor_selection = True
             
-            if self.popup_cursor_manager.isVisible():
-                self.popup_cursor_manager.update_from_plot()
+            # if self.popup_cursor_manager.isVisible():
+            #     self.popup_cursor_manager.update_from_plot()
             
             self.update_cursor_info_panel()
             
@@ -442,6 +480,15 @@ class HistogramDialog(QDialog):
             # 在Histogram标签页时更新cursor manager关联
             if self.tab_widget.currentIndex() == 1:
                 self._sync_cursor_manager_to_canvas(self.subplot3_canvas)
+                # 同步cursor可见性状态
+                if hasattr(self.plot_canvas, 'get_cursors_visible') and hasattr(self.subplot3_canvas, 'set_cursors_visible'):
+                    visibility = self.plot_canvas.get_cursors_visible()
+                    self.subplot3_canvas.set_cursors_visible(visibility)
+                    # 更新按钮文本
+                    if hasattr(self, 'cursor_info_panel'):
+                        self.cursor_info_panel.update_visibility_button_text(visibility)
+                    if hasattr(self.popup_cursor_manager, 'toggle_visibility_btn'):
+                        self.popup_cursor_manager.toggle_visibility_btn.setText("Hide" if visibility else "Show")
                 
         except Exception as e:
             print(f"Error updating subplot3 histogram: {e}")
@@ -560,23 +607,134 @@ class HistogramDialog(QDialog):
             traceback.print_exc()
     
     def _sync_cursor_manager_to_canvas(self, canvas):
-        """同步cursor manager到指定画布"""
-        if self.popup_cursor_manager.isVisible():
-            self.popup_cursor_manager.set_plot_widget(canvas)
+        """同步cursor manager到指定画布 - 修复重复创建问题"""
+        # 确保两个画布之间的cursor数据同步，但histogram不显示cursor
+        try:
+            if canvas == self.subplot3_canvas:
+                # 切换到histogram tab时，将主视图的cursor数据同步到subplot3
+                if hasattr(self.plot_canvas, 'cursor_manager') and hasattr(self.subplot3_canvas, 'cursor_manager'):
+                    # 只同步基本数据，不复制线条引用
+                    source_cursors = self.plot_canvas.cursor_manager.cursors
+                    target_cursors = []
+                    
+                    for cursor in source_cursors:
+                        # 只复制基本数据，不复制线条引用
+                        cursor_copy = {
+                            'id': cursor['id'],
+                            'y_position': cursor['y_position'],
+                            'color': cursor['color'],
+                            'selected': cursor.get('selected', False),
+                            'line_ax2': None,  # 不复制线条引用
+                            'line_ax3': None,  # 不复制线条引用
+                            'histogram_line': None  # histogram模式下不创建
+                        }
+                        target_cursors.append(cursor_copy)
+                    
+                    self.subplot3_canvas.cursor_manager.cursors = target_cursors
+                    
+                    # 同步cursor计数器
+                    self.subplot3_canvas.cursor_manager.cursor_counter = self.plot_canvas.cursor_manager.cursor_counter
+                    
+                    # 同步选中状态
+                    if hasattr(self.plot_canvas.cursor_manager, 'selected_cursor') and self.plot_canvas.cursor_manager.selected_cursor:
+                        selected_id = self.plot_canvas.cursor_manager.selected_cursor.get('id')
+                        for cursor in self.subplot3_canvas.cursor_manager.cursors:
+                            if cursor.get('id') == selected_id:
+                                self.subplot3_canvas.cursor_manager.selected_cursor = cursor
+                                break
+                    else:
+                        self.subplot3_canvas.cursor_manager.selected_cursor = None
+                    
+                    # 同步可见性状态
+                    self.subplot3_canvas.cursor_manager.cursors_visible = self.plot_canvas.cursor_manager.cursors_visible
+                    
+                    # 同步兼容性属性
+                    self._sync_compatibility_attributes(self.subplot3_canvas)
+                    
+                    print(f"Synced {len(self.subplot3_canvas.cursor_manager.cursors)} cursors to histogram view (data only, no display)")
+                    
+            elif canvas == self.plot_canvas:
+                # 切换到主视图时，将subplot3的cursor数据同步到主视图
+                if hasattr(self.subplot3_canvas, 'cursor_manager') and hasattr(self.plot_canvas, 'cursor_manager'):
+                    # 只同步基本数据，不复制线条引用
+                    source_cursors = self.subplot3_canvas.cursor_manager.cursors
+                    target_cursors = []
+                    
+                    for cursor in source_cursors:
+                        # 只复制基本数据，不复制线条引用
+                        cursor_copy = {
+                            'id': cursor['id'],
+                            'y_position': cursor['y_position'],
+                            'color': cursor['color'],
+                            'selected': cursor.get('selected', False),
+                            'line_ax2': None,  # 稍后重新创建
+                            'line_ax3': None,  # 稍后重新创建
+                            'histogram_line': None
+                        }
+                        target_cursors.append(cursor_copy)
+                    
+                    self.plot_canvas.cursor_manager.cursors = target_cursors
+                    
+                    # 同步cursor计数器
+                    self.plot_canvas.cursor_manager.cursor_counter = self.subplot3_canvas.cursor_manager.cursor_counter
+                    
+                    # 同步选中状态
+                    if hasattr(self.subplot3_canvas.cursor_manager, 'selected_cursor') and self.subplot3_canvas.cursor_manager.selected_cursor:
+                        selected_id = self.subplot3_canvas.cursor_manager.selected_cursor.get('id')
+                        for cursor in self.plot_canvas.cursor_manager.cursors:
+                            if cursor.get('id') == selected_id:
+                                self.plot_canvas.cursor_manager.selected_cursor = cursor
+                                break
+                    else:
+                        self.plot_canvas.cursor_manager.selected_cursor = None
+                    
+                    # 同步可见性状态
+                    self.plot_canvas.cursor_manager.cursors_visible = self.subplot3_canvas.cursor_manager.cursors_visible
+                    
+                    # 同步兼容性属性
+                    self._sync_compatibility_attributes(self.plot_canvas)
+                    
+                    # 在主视图中正常显示cursor，使用强制清理重新创建线条
+                    if hasattr(self.plot_canvas, 'cursor_manager'):
+                        # 直接调用刷新方法，其中包含了强制清理
+                        if hasattr(self.plot_canvas, 'refresh_cursors_after_plot_update'):
+                            self.plot_canvas.refresh_cursors_after_plot_update()
+                    
+                    print(f"Synced {len(self.plot_canvas.cursor_manager.cursors)} cursors to main view (with display)")
+                    
+        except Exception as e:
+            print(f"Error syncing cursor data: {e}")
+            import traceback
+            traceback.print_exc()
+    
+    def _sync_compatibility_attributes(self, canvas):
+        """同步兼容性属性，确保旧代码正常工作"""
+        try:
+            if hasattr(canvas, 'cursor_manager'):
+                # 通过设置兼容性属性来触发同步
+                if hasattr(canvas, 'cursors'):
+                    canvas.cursors = canvas.cursor_manager.cursors
+                if hasattr(canvas, 'cursor_counter'):
+                    canvas.cursor_counter = canvas.cursor_manager.cursor_counter
+                if hasattr(canvas, 'selected_cursor'):
+                    canvas.selected_cursor = canvas.cursor_manager.selected_cursor
+        except Exception as e:
+            print(f"Error syncing compatibility attributes: {e}")
     
     def toggle_cursor_manager(self):
-        """切换cursor manager显示"""
-        if self.popup_cursor_manager.isVisible():
-            self.popup_cursor_manager.hide()
-        else:
-            canvas = self.get_current_canvas()
-            self.popup_cursor_manager.set_plot_widget(canvas)
-            self.popup_cursor_manager.show_popup()
-            
-            # 强制激活
-            self.popup_cursor_manager.raise_()
-            self.popup_cursor_manager.activateWindow()
-            self.popup_cursor_manager.setFocus()
+        """切换cursor manager显示 - 不再需要，cursor管理功能已集成到cursor_info_panel"""
+        # if self.popup_cursor_manager.isVisible():
+        #     self.popup_cursor_manager.hide()
+        # else:
+        #     canvas = self.get_current_canvas()
+        #     self.popup_cursor_manager.set_plot_widget(canvas)
+        #     self.popup_cursor_manager.show_popup()
+        #     
+        #     # 强制激活
+        #     self.popup_cursor_manager.raise_()
+        #     self.popup_cursor_manager.activateWindow()
+        #     self.popup_cursor_manager.setFocus()
+        pass
     
     def toggle_fit_display(self):
         """切换拟合曲线显示"""
@@ -596,3 +754,42 @@ class HistogramDialog(QDialog):
                 
         except Exception as e:
             self.status_bar.showMessage(f"Error toggling fit display: {str(e)}")
+    
+    def on_toggle_cursors_visibility(self):
+        """处理cursor可见性切换请求"""
+        try:
+            # 获取当前活动的画布
+            current_canvas = self.get_current_canvas()
+            
+            if hasattr(current_canvas, 'toggle_cursors_visibility'):
+                new_visibility = current_canvas.toggle_cursors_visibility()
+                
+                # 同步到两个画布
+                if current_canvas == self.plot_canvas:
+                    if hasattr(self.subplot3_canvas, 'set_cursors_visible'):
+                        self.subplot3_canvas.set_cursors_visible(new_visibility)
+                elif current_canvas == self.subplot3_canvas:
+                    if hasattr(self.plot_canvas, 'set_cursors_visible'):
+                        self.plot_canvas.set_cursors_visible(new_visibility)
+                
+                # 更新cursor信息面板按钮文本
+                if hasattr(self, 'cursor_info_panel'):
+                    self.cursor_info_panel.update_visibility_button_text(new_visibility)
+                
+                # 更新popup cursor manager按钮文本 - 不再需要
+                # if hasattr(self.popup_cursor_manager, 'toggle_visibility_btn'):
+                #     if new_visibility:
+                #         self.popup_cursor_manager.toggle_visibility_btn.setText("Hide")
+                #     else:
+                #         self.popup_cursor_manager.toggle_visibility_btn.setText("Show")
+                
+                status = "visible" if new_visibility else "hidden"
+                self.status_bar.showMessage(f"Cursors are now {status}")
+            else:
+                self.status_bar.showMessage("Current canvas does not support cursor visibility toggle")
+                
+        except Exception as e:
+            self.status_bar.showMessage(f"Error toggling cursor visibility: {str(e)}")
+            print(f"Error in on_toggle_cursors_visibility: {e}")
+            import traceback
+            traceback.print_exc()

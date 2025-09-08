@@ -22,12 +22,14 @@ class CursorInfoPanel(QWidget):
     cursor_position_changed = pyqtSignal(int, float)  # cursor位置变化
     add_cursor_requested = pyqtSignal()  # 请求添加cursor
     clear_cursors_requested = pyqtSignal()  # 请求清除所有cursor
+    toggle_cursors_visibility_requested = pyqtSignal()  # 请求切换cursor可见性
     
     def __init__(self, parent=None):
         super().__init__(parent)
         self.parent_dialog = parent
         self.selected_cursor_id = None
         self._updating_data = False
+        self._skip_updates_during_tab_change = False  # 用于控制tab切换时是否跳过更新
         
         self.setup_ui()
     
@@ -35,22 +37,43 @@ class CursorInfoPanel(QWidget):
         """设置用户界面"""
         layout = QVBoxLayout()
         layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(10)
+        layout.setSpacing(8)  # 减小间距
         
-        # 操作按钮行
-        button_layout = QHBoxLayout()
-        button_layout.setSpacing(8)
+        # 操作按钮组 - 改为两行布局
+        button_group = QGroupBox("Cursor Management")
+        button_group.setStyleSheet("""
+            QGroupBox {
+                font-weight: bold;
+                font-size: 12px;
+                border: 1px solid #cccccc;
+                border-radius: 5px;
+                margin-top: 10px;
+                padding-top: 10px;
+            }
+            QGroupBox::title {
+                subcontrol-origin: margin;
+                left: 8px;
+                padding: 0 5px 0 5px;
+                color: #333333;
+            }
+        """)
         
-        # 统一的按钮样式
+        button_main_layout = QVBoxLayout()
+        button_main_layout.setSpacing(8)
+        button_main_layout.setContentsMargins(10, 10, 10, 10)
+        
+        # 统一的按钮样式 - 减小字体和高度，确保等宽
         button_style = """
             QPushButton {
                 background-color: #f5f5f5;
                 border: 1px solid #d0d0d0;
                 border-radius: 4px;
-                padding: 6px 12px;
-                font-size: 11px;
+                padding: 5px 6px;
+                font-size: 10px;
                 color: #333333;
                 min-height: 14px;
+                max-height: 20px;
+                font-weight: normal;
             }
             QPushButton:hover {
                 background-color: #e8e8e8;
@@ -67,44 +90,99 @@ class CursorInfoPanel(QWidget):
             }
         """
         
-        # Add按钮
+        # 第一行按钮：Add 和 Delete Selected
+        first_row_layout = QHBoxLayout()
+        first_row_layout.setSpacing(6)
+        
         self.add_btn = QPushButton("Add")
         self.add_btn.setStyleSheet(button_style)
         self.add_btn.clicked.connect(self.add_cursor_requested.emit)
-        button_layout.addWidget(self.add_btn)
+        # 确保等宽
+        self.add_btn.setMinimumWidth(80)
+        self.add_btn.setMaximumWidth(80)
+        first_row_layout.addWidget(self.add_btn)
         
-        # Delete Selected按钮
-        self.delete_selected_btn = QPushButton("Delete Selected")
+        self.delete_selected_btn = QPushButton("Delete")
         self.delete_selected_btn.setStyleSheet(button_style)
         self.delete_selected_btn.clicked.connect(self.delete_selected_cursors)
         self.delete_selected_btn.setEnabled(False)
-        button_layout.addWidget(self.delete_selected_btn)
+        # 确保等宽
+        self.delete_selected_btn.setMinimumWidth(80)
+        self.delete_selected_btn.setMaximumWidth(80)
+        first_row_layout.addWidget(self.delete_selected_btn)
         
-        # Clear按钮
+        button_main_layout.addLayout(first_row_layout)
+        
+        # 第二行按钮：Clear 和 Hide/Show
+        second_row_layout = QHBoxLayout()
+        second_row_layout.setSpacing(6)
+        
         self.clear_btn = QPushButton("Clear")
         self.clear_btn.setStyleSheet(button_style)
         self.clear_btn.clicked.connect(self.clear_cursors_requested.emit)
-        button_layout.addWidget(self.clear_btn)
+        # 确保等宽
+        self.clear_btn.setMinimumWidth(80)
+        self.clear_btn.setMaximumWidth(80)
+        second_row_layout.addWidget(self.clear_btn)
         
-        layout.addLayout(button_layout)
+        self.toggle_visibility_btn = QPushButton("Hide")
+        self.toggle_visibility_btn.setStyleSheet(button_style)
+        self.toggle_visibility_btn.clicked.connect(self.toggle_cursors_visibility_requested.emit)
+        # 确保等宽
+        self.toggle_visibility_btn.setMinimumWidth(80)
+        self.toggle_visibility_btn.setMaximumWidth(80)
+        second_row_layout.addWidget(self.toggle_visibility_btn)
         
-        # Cursor列表 - 增加高度
+        button_main_layout.addLayout(second_row_layout)
+        
+        button_group.setLayout(button_main_layout)
+        layout.addWidget(button_group)
+        
+        # Cursor列表 - 修复高度问题
+        cursor_list_group = QGroupBox("Cursor List")
+        cursor_list_group.setStyleSheet("""
+            QGroupBox {
+                font-weight: bold;
+                font-size: 12px;
+                border: 1px solid #cccccc;
+                border-radius: 5px;
+                margin-top: 8px;
+                padding-top: 8px;
+            }
+            QGroupBox::title {
+                subcontrol-origin: margin;
+                left: 8px;
+                padding: 0 5px 0 5px;
+                color: #333333;
+            }
+        """)
+        
+        cursor_list_layout = QVBoxLayout()
+        cursor_list_layout.setContentsMargins(8, 8, 8, 8)  # 减小边距
+        cursor_list_layout.setSpacing(0)  # 减小间距
+        
         self.cursor_list = QListWidget()
         self.cursor_list.setSelectionMode(QListWidget.SelectionMode.ExtendedSelection)  # 支持多选
         self.cursor_list.itemSelectionChanged.connect(self.on_selection_changed)
         self.cursor_list.itemClicked.connect(self.on_cursor_item_clicked)
-        self.cursor_list.setMinimumHeight(150)  # 增加最小高度
-        self.cursor_list.setMaximumHeight(300)  # 增加最大高度
+        
+        # 设置合理的高度范围，避免过大
+        self.cursor_list.setMinimumHeight(120)  # 减小最小高度
+        self.cursor_list.setMaximumHeight(250)  # 减小最大高度
+        
+        # 设置大小策略，让组件能够正确适应父容器
+        from PyQt6.QtWidgets import QSizePolicy
+        self.cursor_list.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.MinimumExpanding)
         self.cursor_list.setStyleSheet("""
             QListWidget {
                 border: 1px solid #cccccc;
                 border-radius: 4px;
                 background-color: white;
                 selection-background-color: #e3f2fd;
-                font-size: 11px;
+                font-size: 12px;
             }
             QListWidget::item {
-                padding: 6px;
+                padding: 8px;
                 border-bottom: 1px solid #f0f0f0;
             }
             QListWidget::item:selected {
@@ -115,7 +193,10 @@ class CursorInfoPanel(QWidget):
                 background-color: #f5f5f5;
             }
         """)
-        layout.addWidget(self.cursor_list)
+        
+        cursor_list_layout.addWidget(self.cursor_list)
+        cursor_list_group.setLayout(cursor_list_layout)
+        layout.addWidget(cursor_list_group)
         
         # 位置控制组
         position_group = QGroupBox("Position Control")
@@ -137,9 +218,9 @@ class CursorInfoPanel(QWidget):
         
         # 位置标签和输入框
         pos_row = QHBoxLayout()
-        pos_label = QLabel("Y Position:")
-        pos_label.setStyleSheet("font-weight: normal; color: #333333;")
-        pos_row.addWidget(pos_label)
+        self.pos_label = QLabel("Y Position:")  # 使用实例变量，以便动态更改
+        self.pos_label.setStyleSheet("font-weight: normal; color: #333333;")
+        pos_row.addWidget(self.pos_label)
         
         self.position_spinbox = QDoubleSpinBox()
         self.position_spinbox.setDecimals(4)
@@ -179,12 +260,58 @@ class CursorInfoPanel(QWidget):
         """)
         layout.addWidget(self.stats_label)
         
+        # 设置整个面板的大小策略，确保能够适应父容器
+        from PyQt6.QtWidgets import QSizePolicy
+        self.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Preferred)
+        
         self.setLayout(layout)
     
-    def refresh_cursor_list(self, cursor_info_list):
+    def _should_skip_update(self):
+        """判断是否应该跳过更新"""
+        # 在tab切换时跳过更新
+        if hasattr(self.parent_dialog, '_changing_tab') and self.parent_dialog._changing_tab:
+            return True
+        return self._skip_updates_during_tab_change
+    
+    def set_skip_updates(self, skip=True):
+        """设置是否跳过更新"""
+        self._skip_updates_during_tab_change = skip
+    
+    def _delayed_refresh(self):
+        """延迟刷新cursor列表"""
+        try:
+            self._delayed_refresh_attempted = False  # 重置标志
+            if self.parent_dialog and hasattr(self.parent_dialog, 'get_current_canvas'):
+                canvas = self.parent_dialog.get_current_canvas()
+                if canvas and hasattr(canvas, 'get_cursor_info'):
+                    cursor_info = canvas.get_cursor_info()
+                    print(f"[DEBUG] Delayed refresh found {len(cursor_info)} cursors")
+                    if cursor_info:  # 只有在有数据时才刷新
+                        self.refresh_cursor_list(cursor_info, force_update=True)
+                    else:
+                        print("[DEBUG] Delayed refresh still found no cursor data")
+        except Exception as e:
+            print(f"Error in delayed refresh: {e}")
+            self._delayed_refresh_attempted = False
+    
+    def refresh_cursor_list(self, cursor_info_list, force_update=True):
         """刷新cursor列表显示"""
-        if self._updating_data:
+        if self._updating_data or (not force_update and self._should_skip_update()):
             return
+            
+        # 在强制更新模式下，如果数据为空，先检查是否是真实的空数据
+        if force_update and not cursor_info_list:
+            print("[DEBUG] refresh_cursor_list called with empty data in force_update mode")
+            # 在强制更新模式下，如果是空数据，可能是数据还没有同步完成
+            # 稍微延迟后再试一次，但要避免无限循环
+            if not hasattr(self, '_delayed_refresh_attempted'):
+                self._delayed_refresh_attempted = True
+                from PyQt6.QtCore import QTimer
+                QTimer.singleShot(100, lambda: self._delayed_refresh())
+                return
+            else:
+                # 如果已经尝试过延迟刷新，直接清空列表
+                self._delayed_refresh_attempted = False
             
         try:
             self._updating_data = True
@@ -209,7 +336,7 @@ class CursorInfoPanel(QWidget):
                 color = info['color']
                 is_selected = info.get('selected', False)
                 
-                # 创建列表项
+                # 创建列表项 - 统一显示Y坐标（因为histogram中不显示cursor）
                 display_num = i + 1
                 item_text = f"Cursor {display_num}: Y = {y_pos:.4f}"
                 item = QListWidgetItem(item_text)
@@ -240,40 +367,66 @@ class CursorInfoPanel(QWidget):
             self._updating_data = False
     
     def on_selection_changed(self):
-        """处理列表选择变化"""
+        """处理列表选择变化 - 增加防护"""
         if self._updating_data:
             return
             
-        selected_items = self.cursor_list.selectedItems()
-        
-        # 更新删除按钮状态
-        self.delete_selected_btn.setEnabled(len(selected_items) > 0)
-        
-        # 如果只选中一个项目，显示其位置信息
-        if len(selected_items) == 1:
-            cursor_id = selected_items[0].data(Qt.ItemDataRole.UserRole)
-            if cursor_id is not None:
-                self.selected_cursor_id = cursor_id
-                self.cursor_selected.emit(cursor_id)
+        try:
+            selected_items = self.cursor_list.selectedItems()
+            
+            # 更新删除按钮状态
+            self.delete_selected_btn.setEnabled(len(selected_items) > 0)
+            
+            # 如果只选中一个项目，显示其位置信息
+            if len(selected_items) == 1:
+                cursor_id = selected_items[0].data(Qt.ItemDataRole.UserRole)
+                if cursor_id is not None:
+                    self.selected_cursor_id = cursor_id
+                    # 在发送信号前增加防护
+                    if not self._updating_data:
+                        self.cursor_selected.emit(cursor_id)
+                    
+                    # 获取cursor位置并更新position_spinbox
+                    if self.parent_dialog and hasattr(self.parent_dialog, 'get_current_canvas'):
+                        canvas = self.parent_dialog.get_current_canvas()
+                        if canvas and hasattr(canvas, 'get_cursor_info'):
+                            cursor_info = canvas.get_cursor_info()
+                            for info in cursor_info:
+                                if info['id'] == cursor_id:
+                                    self.position_spinbox.setValue(info['y_position'])
+                                    
+                                    # 检查是否在histogram tab，如果是则不启用position control
+                                    is_histogram_tab = False
+                                    if (hasattr(self.parent_dialog, 'tab_widget') and 
+                                        hasattr(self.parent_dialog.tab_widget, 'currentIndex')):
+                                        is_histogram_tab = (self.parent_dialog.tab_widget.currentIndex() == 1)
+                                    
+                                    if not is_histogram_tab:
+                                        self.position_spinbox.setEnabled(True)
+                                    # 在histogram tab中保持禁用状态
+                                    break
+            else:
+                # 多选或无选择时禁用位置控制
+                self.selected_cursor_id = None
+                # 检查是否在histogram tab，如果不是才禁用position control
+                is_histogram_tab = False
+                if (hasattr(self.parent_dialog, 'tab_widget') and 
+                    hasattr(self.parent_dialog.tab_widget, 'currentIndex')):
+                    is_histogram_tab = (self.parent_dialog.tab_widget.currentIndex() == 1)
                 
-                # 获取cursor位置并更新position_spinbox
-                if self.parent_dialog and hasattr(self.parent_dialog, 'get_current_canvas'):
-                    canvas = self.parent_dialog.get_current_canvas()
-                    if canvas and hasattr(canvas, 'get_cursor_info'):
-                        cursor_info = canvas.get_cursor_info()
-                        for info in cursor_info:
-                            if info['id'] == cursor_id:
-                                self.position_spinbox.setValue(info['y_position'])
-                                self.position_spinbox.setEnabled(True)
-                                break
-        else:
-            # 多选或无选择时禁用位置控制
-            self.selected_cursor_id = None
-            self.position_spinbox.setEnabled(False)
-            if len(selected_items) == 0:
-                self.cursor_selected.emit(-1)  # 发送无选择信号
-        
-        self.update_statistics()
+                if not is_histogram_tab:
+                    self.position_spinbox.setEnabled(False)
+                # 在histogram tab中保持原有的禁用状态
+                
+                if len(selected_items) == 0 and not self._updating_data:
+                    self.cursor_selected.emit(-1)  # 发送无选择信号
+            
+            self.update_statistics()
+            
+        except Exception as e:
+            print(f"Error in on_selection_changed: {e}")
+            import traceback
+            traceback.print_exc()
     
     def on_cursor_item_clicked(self, item):
         """处理cursor列表项被点击"""
@@ -351,3 +504,44 @@ class CursorInfoPanel(QWidget):
         self.position_spinbox.setEnabled(False)
         self.delete_selected_btn.setEnabled(False)
         self.update_statistics()
+    
+    def update_visibility_button_text(self, cursors_visible):
+        """更新隐藏/显示按钮的文本"""
+        if cursors_visible:
+            self.toggle_visibility_btn.setText("Hide")
+        else:
+            self.toggle_visibility_btn.setText("Show")
+    
+    def update_position_label_for_tab(self, is_histogram_tab=False):
+        """根据当前tab更新position control状态"""
+        if is_histogram_tab:
+            # 在histogram tab中，由于cursor不可见，禁用Position Control
+            self.pos_label.setText("Position (Hidden):")
+            self.position_spinbox.setEnabled(False)
+            self.position_spinbox.setStyleSheet("""
+                QDoubleSpinBox {
+                    border: 1px solid #cccccc;
+                    border-radius: 4px;
+                    padding: 4px;
+                    font-size: 11px;
+                    background-color: #f5f5f5;
+                    color: #888888;
+                }
+            """)
+        else:
+            # 在main view中，cursor可见，正常显示Y Position
+            self.pos_label.setText("Y Position:")
+            # position_spinbox的启用状态由选中状态决定，这里只恢复样式
+            self.position_spinbox.setStyleSheet("""
+                QDoubleSpinBox {
+                    border: 1px solid #cccccc;
+                    border-radius: 4px;
+                    padding: 4px;
+                    font-size: 11px;
+                    background-color: white;
+                }
+                QDoubleSpinBox:disabled {
+                    background-color: #f5f5f5;
+                    color: #888888;
+                }
+            """)

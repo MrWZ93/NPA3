@@ -40,6 +40,7 @@ class DataVisualizer(FigureCanvas):
         self.current_title = "Data"  # Store the current title
         self.visible_channels = []  # 存储需要显示的通道
         self.original_data = None  # 存储原始数据，以便过滤显示通道
+        self.current_time_axis = None  # 存储当前显示的时间轴，供trim操作使用
     
     def plot_data(self, data, title="Data", xlabel="Time (s)", ylabel="Value", sampling_rate=None, channels_to_plot=None):
         """绘制数据 - 使用美化样式"""
@@ -58,7 +59,8 @@ class DataVisualizer(FigureCanvas):
         plt.rcParams['axes.prop_cycle'] = plt.cycler(color=PLOT_COLORS)
         self.fig.patch.set_facecolor(COLORS["card"])
         
-        # 存储原始数据以便后续使用
+        # **重要修复**: 强制更新存储的数据为处理后的数据
+        self.data = data
         self.original_data = data
         
         # 处理需要显示的通道
@@ -94,6 +96,7 @@ class DataVisualizer(FigureCanvas):
                 first_key = next(iter(data))
                 filtered_data = {first_key: data[first_key]}
                 self.visible_channels = [first_key]
+            # **重要修复**: 更新data为过滤后的数据
             self.data = filtered_data
         elif isinstance(data, np.ndarray) and data.ndim == 2 and self.visible_channels:
             # 对于二维数组，根据通道名称筛选列
@@ -112,10 +115,9 @@ class DataVisualizer(FigureCanvas):
                 channel_indices = [0]
                 self.visible_channels = [f"Channel 1"]
             
+            # **重要修复**: 更新data为过滤后的数据
             self.data = data[:, channel_indices] if channel_indices else data[:, :1]
-        else:
-            self.data = data
-            
+        
         self.current_title = title  # Store the title
         self.fig.clear()
         self.axes = []
@@ -124,7 +126,7 @@ class DataVisualizer(FigureCanvas):
         if sampling_rate is not None and sampling_rate > 0:
             self.sampling_rate = sampling_rate
         
-        if data is not None:
+        if self.data is not None:
             if isinstance(self.data, dict):
                 # 处理多通道数据 - Create a subplot for each channel
                 channels = list(self.data.keys())
@@ -189,19 +191,28 @@ class DataVisualizer(FigureCanvas):
                     # 使用时间数据作为X轴（如果有），否则生成时间轴
                     try:
                         if time_data is not None and len(time_data) == len(values):
-                            # 如果有时间数据，计算相对时间（从0开始）
-                            time_offset = time_data[0] if len(time_data) > 0 else 0
-                            relative_time = time_data - time_offset
+                            # **修复**: 直接使用时间数据，不要重置时间轴
+                            # 这样trim后的数据会保持用户选择的时间范围
+                            current_x_axis = time_data
+                            ax.plot(time_data, values)
                             
-                            # 使用相对时间绘制，使图形从0开始
-                            ax.plot(relative_time, values)
+                            # **关键修复**: 存储当前使用的时间轴，供trim操作参考
+                            if i == 0:  # 只在第一个通道时存储时间轴
+                                self.current_time_axis = time_data.copy()
+                            
                             # 使用真实时间数据时，需要设置X轴标签
                             if i == num_channels - 1 or not self.sync_mode:  # 只在底部图或非同步图中显示X轴标签
                                 ax.set_xlabel("Time (s)", fontsize=10, fontweight='bold')
                         else:
                             # 生成基于采样率的时间轴
                             time_axis = np.arange(len(values)) / self.sampling_rate
+                            current_x_axis = time_axis
                             ax.plot(time_axis, values)
+                            
+                            # **关键修复**: 存储当前使用的时间轴，供trim操作参考
+                            if i == 0:  # 只在第一个通道时存储时间轴
+                                self.current_time_axis = time_axis.copy()
+                            
                             # 同步时，只在底部子图显示X轴标签
                             if self.sync_mode and i < num_channels - 1:
                                 ax.tick_params(labelbottom=False)
@@ -238,6 +249,9 @@ class DataVisualizer(FigureCanvas):
                     # Generate time axis
                     time_axis = np.arange(len(self.data)) / self.sampling_rate
                     ax.plot(time_axis, self.data)
+                    
+                    # **关键修复**: 存储当前使用的时间轴，供trim操作参考
+                    self.current_time_axis = time_axis.copy()
                     
                     ax.set_title(title, fontsize=12, fontweight='bold', color=COLORS["primary"])
                     ax.set_xlabel(xlabel, fontsize=10, fontweight='bold')
@@ -281,6 +295,10 @@ class DataVisualizer(FigureCanvas):
                         # Generate time axis
                         time_axis = np.arange(self.data.shape[0]) / self.sampling_rate
                         ax.plot(time_axis, self.data[:, i])
+                        
+                        # **关键修复**: 存储当前使用的时间轴，供trim操作参考
+                        if i == 0:  # 只在第一个通道时存储时间轴
+                            self.current_time_axis = time_axis.copy()
                         
                         # 美化轴标签
                         ax.set_ylabel(f"Channel {i+1}", fontsize=10, fontweight='bold')
@@ -414,8 +432,13 @@ class DataVisualizer(FigureCanvas):
         if self.sync_mode and len(self.axes) > 1:
             self.sync_x_axes()
     
+    def get_current_time_axis(self):
+        """获取当前显示的时间轴，供trim操作使用"""
+        return self.current_time_axis
+    
     def clear(self):
         """清除图表"""
         self.fig.clear()
         self.axes = []
+        self.current_time_axis = None  # 清空时间轴
         self.draw()

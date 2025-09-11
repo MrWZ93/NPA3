@@ -546,7 +546,7 @@ class ProcessingTab(QWidget):
             
             end_spin = QDoubleSpinBox()
             end_spin.setRange(0, 1000000)
-            end_spin.setValue(1)
+            end_spin.setValue(10)  # **修复**: 设置一个合理的默认结束时间10秒
             end_spin.setSuffix(" s")  # Add seconds suffix
             end_spin.setDecimals(3)  # Allow millisecond precision
             end_spin.setMinimumWidth(200)  # Set minimum width
@@ -648,147 +648,21 @@ class ProcessingTab(QWidget):
             else:
                 params[key] = widget.value()
         
+        # **调试**: 打印参数信息
+        print(f"**DEBUG UI**: Operation: {self.current_operation}")
+        print(f"**DEBUG UI**: Parameters from UI: {params}")
+        print(f"**DEBUG UI**: param_widgets keys: {list(self.param_widgets.keys())}")
+        
+        # **增加详细调试**: 检查每个参数控件的值
+        for key, widget in self.param_widgets.items():
+            if hasattr(widget, 'value'):
+                widget_value = widget.value()
+                print(f"**DEBUG UI**: Widget {key} value: {widget_value} (type: {type(widget).__name__})")
+        
         # 添加通道选择参数
         selected_channel = self.channel_combo.currentText()
         if selected_channel != "All Channels":
             params["channel"] = selected_channel
-        
-        return params
-    
-    # Add to your ProcessingTab class in gui/tabs.py
-
-    def setup_ac_notch_filter_ui(self):
-        """Setup AC notch filter UI components"""
-        # Add AC Notch Filter to your operation mappings
-        if not hasattr(self, 'operation_mappings'):
-            self.operation_mappings = {}
-        
-        self.operation_mappings["AC Notch Filter"] = "AC_Notch_Filter"
-        
-        # Add AC notch filter specific parameters
-        self.ac_notch_params = {}
-    
-        # Power frequency selector
-        power_freq_layout = QHBoxLayout()
-        power_freq_label = QLabel("Power Frequency:")
-        self.power_freq_combo = QComboBox()
-        self.power_freq_combo.addItems(["60 Hz (US Standard)", "50 Hz (China Standard)"])
-        self.power_freq_combo.setCurrentIndex(0)  # Default to 60Hz as requested
-        
-        power_freq_layout.addWidget(power_freq_label)
-        power_freq_layout.addWidget(self.power_freq_combo)
-        
-        # Quality factor
-        quality_layout = QHBoxLayout()
-        quality_label = QLabel("Quality Factor:")
-        self.quality_spinbox = QSpinBox()
-        self.quality_spinbox.setRange(10, 100)
-        self.quality_spinbox.setValue(30)
-        self.quality_spinbox.setToolTip("Higher values create narrower notches")
-        
-        quality_layout.addWidget(quality_label)
-        quality_layout.addWidget(self.quality_spinbox)
-        
-        # Remove harmonics checkbox
-        self.remove_harmonics_check = QCheckBox("Remove Harmonics")
-        self.remove_harmonics_check.setChecked(True)
-        self.remove_harmonics_check.setToolTip("Also remove 2nd, 3rd, 4th, and 5th harmonics")
-        
-        # Max harmonic
-        harmonic_layout = QHBoxLayout()
-        harmonic_label = QLabel("Max Harmonic:")
-        self.max_harmonic_spinbox = QSpinBox()
-        self.max_harmonic_spinbox.setRange(2, 10)
-        self.max_harmonic_spinbox.setValue(5)
-        
-        harmonic_layout.addWidget(harmonic_label)
-        harmonic_layout.addWidget(self.max_harmonic_spinbox)
-        
-        # Store widgets for later access
-        self.ac_notch_params = {
-            'power_freq_combo': self.power_freq_combo,
-            'quality_spinbox': self.quality_spinbox,
-            'remove_harmonics_check': self.remove_harmonics_check,
-            'max_harmonic_spinbox': self.max_harmonic_spinbox,
-            'layouts': [power_freq_layout, quality_layout, harmonic_layout]
-        }
-
-    def get_ac_notch_parameters(self):
-        """Get AC notch filter parameters from UI"""
-        if not hasattr(self, 'ac_notch_params'):
-            return {}
-        
-        # Extract frequency value from combo box text
-        freq_text = self.power_freq_combo.currentText()
-        if "60 Hz" in freq_text:
-            power_frequency = 60
-        elif "50 Hz" in freq_text:
-            power_frequency = 50
-        else:
-            power_frequency = 60  # Default fallback
-        
-        params = {
-            "power_frequency": power_frequency,
-            "quality_factor": self.quality_spinbox.value(),
-            "remove_harmonics": self.remove_harmonics_check.isChecked(),
-            "max_harmonic": self.max_harmonic_spinbox.value()
-        }
-        
-        return params
-
-    def update_parameter_ui(self, operation):
-        """Update parameter UI based on selected operation"""
-        # Hide all parameter widgets first
-        self.hide_all_parameter_widgets()
-        
-        # Show relevant widgets based on operation
-        if operation == "AC_Notch_Filter":
-            self.show_ac_notch_widgets()
-        # ... other operations ...
-
-    def show_ac_notch_widgets(self):
-        """Show AC notch filter parameter widgets"""
-        if hasattr(self, 'ac_notch_params'):
-            for layout in self.ac_notch_params['layouts']:
-                self.show_layout_widgets(layout)
-            self.remove_harmonics_check.show()
-
-    def hide_all_parameter_widgets(self):
-        """Hide all parameter widgets"""
-        if hasattr(self, 'ac_notch_params'):
-            for layout in self.ac_notch_params['layouts']:
-                self.hide_layout_widgets(layout)
-            self.remove_harmonics_check.hide()
-
-    def show_layout_widgets(self, layout):
-        """Show all widgets in a layout"""
-        for i in range(layout.count()):
-            widget = layout.itemAt(i).widget()
-            if widget:
-                widget.show()
-
-    def hide_layout_widgets(self, layout):
-        """Hide all widgets in a layout"""
-        for i in range(layout.count()):
-            widget = layout.itemAt(i).widget()
-            if widget:
-                widget.hide()
-
-    # Modify your get_parameters method to include AC notch filter
-    def get_parameters(self):
-        """Get current processing parameters"""
-        params = {}
-        
-        # Get selected channel
-        if hasattr(self, 'channel_combo'):
-            selected_channel = self.channel_combo.currentText()
-            if selected_channel != "All Channels":
-                params["channel"] = selected_channel
-        
-        # Get operation-specific parameters
-        if self.current_operation == "AC_Notch_Filter":
-            params.update(self.get_ac_notch_parameters())
-        # ... handle other operations ...
         
         return params
 

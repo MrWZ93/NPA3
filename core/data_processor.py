@@ -407,7 +407,7 @@ class FileDataProcessor:
                 except Exception:
                     pass  # 忽略恢复设置时的错误
     
-    def process_data(self, operation, params=None):
+    def process_data(self, operation, params=None, current_time_axis=None):
         """处理数据"""
         if self.current_data is None:
             return False, None, "No data to process"
@@ -436,68 +436,99 @@ class FileDataProcessor:
                         data = self.current_data[channel]
                         if isinstance(data, np.ndarray):
                             if operation == "裁切":
-                                # Get time values
+                                # **全新的简化trim逻辑**: 直接使用可视化组件提供的时间轴信息
                                 start_time = params.get("start_time", 0)
-                                end_time = params.get("end_time", len(data) / sampling_rate)
+                                end_time = params.get("end_time", 10.0)
                                 
-                                # 特殊处理Time通道 - 直接使用相对时间（从0开始）进行裁切
-                                if channel == "Time" and time_data is not None:
-                                    # 计算相对时间（从0开始）
-                                    time_offset = time_data[0] if len(time_data) > 0 else 0
-                                    relative_time = time_data - time_offset
+                                print(f"**TRIM_FIX**: Operation=trim, start_time={start_time}, end_time={end_time}")
+                                print(f"**TRIM_FIX**: Channel={channel}, data_length={len(data)}")
+                                
+                                # **关键修复**: 使用与可视化完全一致的时间轴计算方式
+                                if current_time_axis is not None and len(current_time_axis) == len(data):
+                                    # 使用可视化组件提供的时间轴
+                                    print(f"**TRIM_FIX**: Using visualizer time axis, range: {np.min(current_time_axis):.3f}s to {np.max(current_time_axis):.3f}s")
                                     
-                                    # 根据输入的范围在相对时间上找到索引
-                                    start_indices = np.where(relative_time >= start_time)[0]
+                                    # 直接在可视化时间轴上查找对应的索引
+                                    start_indices = np.where(current_time_axis >= start_time)[0]
+                                    end_indices = np.where(current_time_axis <= end_time)[0]
+                                    
                                     if len(start_indices) == 0:
-                                        max_time = np.max(relative_time)
-                                        raise ValueError(f"起始时间 {start_time}s 超出了有效范围（最大时间为 {max_time:.3f}s）")
-                                    start_sample = start_indices[0]
-                                    
-                                    end_indices = np.where(relative_time <= end_time)[0]
+                                        raise ValueError(f"起始时间 {start_time}s 超出了可视化时间范围 [{np.min(current_time_axis):.3f}s, {np.max(current_time_axis):.3f}s]")
                                     if len(end_indices) == 0:
-                                        max_time = np.max(relative_time)
-                                        raise ValueError(f"结束时间 {end_time}s 超出了有效范围（最大时间为 {max_time:.3f}s）")
-                                    end_sample = end_indices[-1]
+                                        raise ValueError(f"结束时间 {end_time}s 超出了可视化时间范围 [{np.min(current_time_axis):.3f}s, {np.max(current_time_axis):.3f}s]")
                                     
-                                    # 确保end_sample > start_sample
+                                    start_sample = start_indices[0]
+                                    end_sample = end_indices[-1] + 1  # +1 to include the end point
+                                    
                                     if end_sample <= start_sample:
-                                        raise ValueError(f"裁切范围无效：结束时间必须大于起始时间")
+                                        raise ValueError(f"裁切范围无效：结束时间({end_time}s)必须大于起始时间({start_time}s)")
                                     
-                                    # 保存范围信息，用于基于图表显示的反馈
-                                    actual_relative_start = relative_time[start_sample]
-                                    actual_relative_end = relative_time[end_sample]
-                                    print(f"裁切时间通道: 输入范围 {start_time}s-{end_time}s, 实际裁切范围（x轴上显示） {actual_relative_start:.3f}s-{actual_relative_end:.3f}s")
+                                    # 裁切数据
+                                    trimmed_data = data[start_sample:end_sample]
+                                    processed_data[channel] = trimmed_data
                                     
-                                    # 记录偏移量，用于后续的更新
-                                    self.time_offset = time_offset
+                                    # **关键**: 如果是第一个处理的通道，也创建对应的裁切时间轴
+                                    if channel == list(channels_to_process)[0] or channel == "Time":
+                                        trimmed_time_axis = current_time_axis[start_sample:end_sample]
+                                        processed_data["Time"] = trimmed_time_axis
+                                        print(f"**TRIM_FIX**: Created trimmed time axis: {np.min(trimmed_time_axis):.3f}s to {np.max(trimmed_time_axis):.3f}s")
                                     
-                                    # 确保end_sample > start_sample
-                                    if end_sample <= start_sample:
-                                        end_sample = min(start_sample + 1, len(time_data)-1)
-                                        
-                                    # 保存开始和结束索引，以便其他通道使用相同的裁切范围
+                                    print(f"**TRIM_FIX**: Channel {channel} trimmed from samples {start_sample} to {end_sample-1}, new shape: {trimmed_data.shape}")
+                                    
+                                elif channel == "Time" and time_data is not None:
+                                    # 对于Time通道，如果没有可视化时间轴，则直接使用Time数据
+                                    print(f"**TRIM_FIX**: Processing Time channel directly")
+                                    
+                                    start_indices = np.where(time_data >= start_time)[0]
+                                    end_indices = np.where(time_data <= end_time)[0]
+                                    
+                                    if len(start_indices) == 0 or len(end_indices) == 0:
+                                        raise ValueError(f"时间范围 [{start_time}s, {end_time}s] 超出数据范围")
+                                    
+                                    start_sample = start_indices[0]
+                                    end_sample = end_indices[-1] + 1
+                                    
+                                    # 保存索引供其他通道使用
                                     time_start_sample = start_sample
                                     time_end_sample = end_sample
                                     
-                                    # 获取实际的时间范围
-                                    actual_start = time_data[start_sample]
-                                    actual_end = time_data[end_sample]
-                                    print(f"裁切时间通道: 请求范围 {start_time}-{end_time}s, 实际范围 {actual_start}-{actual_end}s")
+                                    trimmed_time_data = time_data[start_sample:end_sample]
+                                    processed_data[channel] = trimmed_time_data
+                                    
+                                    print(f"**TRIM_FIX**: Time channel trimmed: {np.min(trimmed_time_data):.3f}s to {np.max(trimmed_time_data):.3f}s")
+                                    
                                 else:
-                                    # 对于非Time通道，使用与Time通道相同的索引范围
+                                    # 对于非Time通道，使用Time通道计算的索引或采样率计算
                                     if has_time_channel and 'time_start_sample' in locals() and 'time_end_sample' in locals():
                                         start_sample = time_start_sample
                                         end_sample = time_end_sample
+                                        print(f"**TRIM_FIX**: Using time-based indices for channel {channel}")
                                     else:
-                                        # 回退到采样率计算
+                                        # 使用采样率计算（与可视化生成方式一致）
                                         start_sample = int(start_time * sampling_rate)
                                         end_sample = int(end_time * sampling_rate)
-                                
-                                # Make sure indices are within bounds
-                                start_sample = max(0, min(start_sample, len(data) - 1))
-                                end_sample = max(start_sample + 1, min(end_sample, len(data)))
-                                
-                                processed_data[channel] = data[start_sample:end_sample]
+                                        print(f"**TRIM_FIX**: Using sampling rate calculation for channel {channel}")
+                                        
+                                        # 如果没有Time通道，创建时间轴
+                                        if not has_time_channel and channel == list(self.current_data.keys())[0]:
+                                            trimmed_time_axis = np.arange(start_sample, end_sample) / sampling_rate
+                                            processed_data["Time"] = trimmed_time_axis
+                                            print(f"**TRIM_FIX**: Created time axis: {np.min(trimmed_time_axis):.3f}s to {np.max(trimmed_time_axis):.3f}s")
+                                    
+                                    # 确保索引范围有效
+                                    start_sample = max(0, min(start_sample, len(data) - 1))
+                                    end_sample = max(start_sample + 1, min(end_sample, len(data)))
+                                    
+                                    trimmed_data = data[start_sample:end_sample]
+                                    processed_data[channel] = trimmed_data
+                                    
+                                    print(f"**TRIM_FIX**: Channel {channel} processed, new shape: {trimmed_data.shape}")
+                                    
+                                # **重要**: 验证trim结果的一致性
+                                if "Time" in processed_data:
+                                    actual_start = np.min(processed_data["Time"])
+                                    actual_end = np.max(processed_data["Time"])
+                                    print(f"**TRIM_SUCCESS**: Final time range: {actual_start:.3f}s to {actual_end:.3f}s (requested: {start_time:.3f}s to {end_time:.3f}s)")
                             
                             elif operation == "低通滤波":
                                 # Get frequency in Hz
@@ -925,6 +956,14 @@ class FileDataProcessor:
                     relative_end = time_data[-1] - time_offset
                     
                     return True, processed_data, f"处理成功: 裁切范围（图表x轴上显示的） {relative_start:.3f}s - {relative_end:.3f}s"
+            
+            # **修复trim操作的返回信息**
+            if operation == "裁切" and "Time" in processed_data:
+                time_data = processed_data["Time"]
+                if len(time_data) > 0:
+                    actual_start = np.min(time_data)
+                    actual_end = np.max(time_data)
+                    return True, processed_data, f"裁切成功: 时间范围 {actual_start:.3f}s - {actual_end:.3f}s (数据点: {len(time_data)})"
             
             return True, processed_data, "Processing successful"
             

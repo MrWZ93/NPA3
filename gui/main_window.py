@@ -627,6 +627,9 @@ class FileExplorerApp(QMainWindow):
                 success, data, info = self.data_processor.load_file(file_path)
                 
                 if success:
+                    # **修复相关问题**: 重置处理状态，确保新文件从原始数据开始处理
+                    self.processed_data = None
+                    
                     # 更新文件信息
                     self.details_tab.update_info(info)
                     
@@ -757,8 +760,15 @@ class FileExplorerApp(QMainWindow):
             success, data, info = self.data_processor.load_file(file_path)
             
             if success:
+                # **修复相关问题**: 更新当前文件路径和重置处理状态
+                self.current_file_path = file_path
+                self.processed_data = data  # 设置为已加载的处理后数据
+                
                 # 更新文件信息
                 self.details_tab.update_info(info)
+                
+                # 更新通道选择器
+                self.update_channel_selector(data)
                 
                 # 可视化数据 - use current sampling rate
                 self.visualizer.plot_data(
@@ -783,10 +793,22 @@ class FileExplorerApp(QMainWindow):
         # Add current sampling rate to params
         params["sampling_rate"] = self.viz_controls_tab.sampling_rate_input.value()
         
-        success, processed_data, message = self.data_processor.process_data(operation, params)
+        # **关键修复**: 获取当前可视化的时间轴，传递给数据处理器
+        current_time_axis = None
+        if hasattr(self.visualizer, 'get_current_time_axis'):
+            current_time_axis = self.visualizer.get_current_time_axis()
+            if current_time_axis is not None:
+                print(f"**MAIN_WINDOW**: Passing time axis to processor, range: {np.min(current_time_axis):.3f}s to {np.max(current_time_axis):.3f}s")
+            else:
+                print(f"**MAIN_WINDOW**: No time axis available from visualizer")
+        
+        success, processed_data, message = self.data_processor.process_data(operation, params, current_time_axis)
         
         if success:
             self.processed_data = processed_data
+            
+            # **修复问题2**: 更新数据处理器的current_data为处理后的数据，以便后续处理基于已处理的数据
+            self.data_processor.current_data = processed_data
             
             # Get operation display name (English)
             operation_display = operation
@@ -801,6 +823,11 @@ class FileExplorerApp(QMainWindow):
                 title=f"{os.path.basename(self.current_file_path)} (After {operation_display})",
                 sampling_rate=self.viz_controls_tab.sampling_rate_input.value()
             )
+            
+            # **修复问题1**: 更新可视化器的original_data为处理后的数据，确保可视化显示处理后的数据
+            # **重要**: 强制清除可视化器的缓存数据，确保显示处理后的数据
+            self.visualizer.data = processed_data
+            self.visualizer.original_data = processed_data
             
             # 更新通道选择器，以适应处理后的数据结构
             self.update_channel_selector(processed_data)

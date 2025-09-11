@@ -197,7 +197,7 @@ class FileExplorerApp(QMainWindow):
         self.file_list.setTextElideMode(Qt.TextElideMode.ElideMiddle)
         
         # 设置初始文件夹路径
-        self.current_folder = QDir.currentPath()
+        self.current_folder = self.get_initial_folder()
         self.folder_path.setText(self.current_folder)
         # 加载当前文件夹内容
         self.load_folder_contents(self.current_folder)
@@ -464,6 +464,12 @@ class FileExplorerApp(QMainWindow):
         # 添加弹簧使帮助按钮靠右
         toolbar_layout.addStretch(1)
         
+        # 设置默认路径按钮
+        set_default_path_btn = QPushButton("Set Default Path")
+        set_default_path_btn.setIcon(QIcon.fromTheme("preferences-system"))
+        set_default_path_btn.clicked.connect(self.set_default_path)
+        toolbar_layout.addWidget(set_default_path_btn)
+        
         # 帮助按钮
         help_btn = QPushButton("Help")
         help_btn.setIcon(QIcon.fromTheme("help-contents"))
@@ -515,6 +521,46 @@ class FileExplorerApp(QMainWindow):
                 
         except Exception as e:
             QMessageBox.warning(self, "Error", f"Failed to load folder contents: {str(e)}")
+    
+    def get_initial_folder(self):
+        """获取初始文件夹路径"""
+        # 从配置中获取默认路径
+        default_path = self.config_manager.config.get('default_path')
+        
+        if default_path and os.path.exists(default_path):
+            return default_path
+        
+        # 如果默认路径不存在，使用代码所在目录
+        script_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        if os.path.exists(script_dir):
+            return script_dir
+            
+        # 最后的选择：当前工作目录
+        return QDir.currentPath()
+    
+    def set_default_path(self):
+        """设置默认路径"""
+        current_default = self.config_manager.config.get('default_path', self.current_folder)
+        
+        folder = QFileDialog.getExistingDirectory(
+            self, 
+            "Set Default Folder", 
+            current_default
+        )
+        
+        if folder:
+            # 保存到配置
+            self.config_manager.update_config('default_path', folder)
+            
+            # 显示成功消息
+            QMessageBox.information(
+                self, 
+                "Success", 
+                f"Default path has been set to:\n{folder}\n\nThis will be used as the starting folder next time you open the application."
+            )
+            
+            # 更新状态栏
+            self.statusBar.showMessage(f"Default path set to: {folder}", 3000)
     
     def browse_folder(self):
         """浏览并选择文件夹"""
@@ -991,6 +1037,7 @@ class FileExplorerApp(QMainWindow):
         <h3>Basic Operations:</h3>
         <ul>
             <li><b>Browse Folder</b>: Select a folder containing data files</li>
+            <li><b>Set Default Path</b>: Set a default starting folder for the application</li>
             <li><b>Select File</b>: Click on a file in the file browser to load it</li>
             <li><b>Process Data</b>: Select processing operations in the Processing tab</li>
             <li><b>Save Results</b>: Save processed data to a new file</li>

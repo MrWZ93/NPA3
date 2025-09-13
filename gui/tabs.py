@@ -613,13 +613,93 @@ class ProcessingTab(QWidget):
             self.param_widgets["max_harmonic"] = max_harmonic_spin
             
         elif self.current_operation == "基线校正":  # Baseline Correction
-            points_spin = QSpinBox()
-            points_spin.setRange(1, 10000)
-            points_spin.setValue(100)
-            points_spin.setMinimumWidth(200)  # Set minimum width
+            # 添加基线校正说明标签
+            baseline_desc_label = QLabel("Select initial stable period for baseline fitting (relative time from start)")
+            baseline_desc_label.setStyleSheet("color: #0078d7; font-style: italic;")
+            self.params_layout.addRow("", baseline_desc_label)
             
-            self.params_layout.addRow("Baseline Points:", points_spin)
-            self.param_widgets["points"] = points_spin
+            # 基线校正方法选择
+            correction_method_combo = QComboBox()
+            correction_method_combo.addItems(["Select first N seconds (like reference code)", "Select time range (advanced)"])
+            correction_method_combo.setCurrentIndex(0)  # 默认选择参考代码方式
+            correction_method_combo.setMinimumWidth(200)
+            correction_method_combo.currentIndexChanged.connect(self._on_baseline_method_changed)
+            
+            self.params_layout.addRow("Baseline Method:", correction_method_combo)
+            self.param_widgets["baseline_method"] = correction_method_combo
+            
+            # 方法1：选择前N秒（参考代码方式）
+            first_n_seconds_spin = QDoubleSpinBox()
+            first_n_seconds_spin.setRange(0.1, 100.0)
+            first_n_seconds_spin.setValue(4.0)  # 默认前4秒，与用户参考代码一致
+            first_n_seconds_spin.setSuffix(" s (from start)")
+            first_n_seconds_spin.setDecimals(3)
+            first_n_seconds_spin.setMinimumWidth(200)
+            
+            self.params_layout.addRow("Use First:", first_n_seconds_spin)
+            self.param_widgets["first_n_seconds"] = first_n_seconds_spin
+            
+            # 方法2：时间范围（高级方式）- 初始隐藏
+            fit_start_spin = QDoubleSpinBox()
+            fit_start_spin.setRange(0, 1000000)
+            fit_start_spin.setValue(0.0)
+            fit_start_spin.setSuffix(" s (relative)")
+            fit_start_spin.setDecimals(3)
+            fit_start_spin.setMinimumWidth(200)
+            fit_start_spin.setVisible(False)  # 初始隐藏
+            
+            fit_end_spin = QDoubleSpinBox()
+            fit_end_spin.setRange(0, 1000000)
+            fit_end_spin.setValue(4.0)
+            fit_end_spin.setSuffix(" s (relative)")
+            fit_end_spin.setDecimals(3)
+            fit_end_spin.setMinimumWidth(200)
+            fit_end_spin.setVisible(False)  # 初始隐藏
+            
+            # 创建标签用于控制显示/隐藏
+            self.fit_start_label = QLabel("Fit Start Time:")
+            self.fit_end_label = QLabel("Fit End Time:")
+            self.fit_start_label.setVisible(False)
+            self.fit_end_label.setVisible(False)
+            
+            self.params_layout.addRow(self.fit_start_label, fit_start_spin)
+            self.params_layout.addRow(self.fit_end_label, fit_end_spin)
+            
+            # 多项式拟合方法选择
+            poly_method_combo = QComboBox()
+            poly_method_combo.addItems(["Linear Fit", "Polynomial Fit (degree 2)", "Polynomial Fit (degree 3)"])
+            poly_method_combo.setCurrentIndex(0)  # 默认线性拟合
+            poly_method_combo.setMinimumWidth(200)
+            
+            # 是否保持数据均值
+            preserve_mean_check = QCheckBox()
+            preserve_mean_check.setChecked(True)  # 默认保持均值，参考用户脚本
+            preserve_mean_check.setText("Preserve original data mean after correction")
+            
+            self.params_layout.addRow("Fitting Method:", poly_method_combo)
+            self.params_layout.addRow("Preserve Mean:", preserve_mean_check)
+            
+            self.param_widgets["fit_start_time"] = fit_start_spin
+            self.param_widgets["fit_end_time"] = fit_end_spin
+            self.param_widgets["correction_method"] = poly_method_combo
+            self.param_widgets["preserve_mean"] = preserve_mean_check
+    
+    def _on_baseline_method_changed(self, index):
+        """基线校正方法变更处理"""
+        if index == 0:  # 前N秒方式
+            # 显示前N秒控件，隐藏时间范围控件
+            self.param_widgets["first_n_seconds"].setVisible(True)
+            self.param_widgets["fit_start_time"].setVisible(False)
+            self.param_widgets["fit_end_time"].setVisible(False)
+            self.fit_start_label.setVisible(False)
+            self.fit_end_label.setVisible(False)
+        else:  # 时间范围方式
+            # 隐藏前N秒控件，显示时间范围控件
+            self.param_widgets["first_n_seconds"].setVisible(False)
+            self.param_widgets["fit_start_time"].setVisible(True)
+            self.param_widgets["fit_end_time"].setVisible(True)
+            self.fit_start_label.setVisible(True)
+            self.fit_end_label.setVisible(True)
     
     def get_parameters(self):
         """获取当前参数设置"""
@@ -640,6 +720,19 @@ class ProcessingTab(QWidget):
                         params[key] = 50
                     else:
                         params[key] = 60  # Default fallback
+                elif key == "correction_method":  # Special handling for baseline correction method
+                    method_text = widget.currentText()
+                    if "Linear Fit" in method_text:
+                        params[key] = "linear"
+                    elif "Polynomial Fit (degree 2)" in method_text:
+                        params[key] = "poly2"
+                    elif "Polynomial Fit (degree 3)" in method_text:
+                        params[key] = "poly3"
+                    else:
+                        params[key] = "linear"  # Default fallback
+                elif key == "baseline_method":  # Special handling for baseline method selection
+                    method_index = widget.currentIndex()
+                    params[key] = "first_n_seconds" if method_index == 0 else "time_range"
                 else:
                     data_index = widget.currentIndex()
                     params[key] = widget.itemData(data_index)

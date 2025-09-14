@@ -229,16 +229,14 @@ class BasePlot(FigureCanvas):
         if len(highlighted_time) > 0:
             self.ax2.set_xlim(highlighted_time[0], highlighted_time[-1])
         
-        # 设置对数轴
-        if self.log_x:
+        # 修复：对于横向直方图，log_x 和 log_y 都控制 X 轴（count轴）
+        # 只要任一启用，就使用对数刻度
+        if self.log_x or self.log_y:
             self.ax3.set_xscale('log')
         else:
             self.ax3.set_xscale('linear')
-            
-        if self.log_y:
-            self.ax3.set_yscale('log')
-        else:
-            self.ax3.set_yscale('linear')
+        
+        # 不要设置 ax3 的 Y 轴为对数刻度，因为这会影响与 ax2 共享的 amplitude 轴
         
         # 设置高亮区域Y轴范围
         highlighted_data = -self.data[self.highlight_min:self.highlight_max] if self.invert_data else self.data[self.highlight_min:self.highlight_max]
@@ -317,21 +315,20 @@ class BasePlot(FigureCanvas):
                 alpha=0.7
             )
             
-            # 检查对数刻度的有效性
-            if self.log_y and not np.all(counts > 0):
-                print("Warning: Disabling Y log scale due to zero counts in histogram")
+            # 修复：使用更宽松的对数刻度有效性检查
+            # 只要有任何一个bin有数据就可以使用对数刻度
+            if self.log_y and not np.any(counts > 0):
+                print("Warning: Disabling count axis log scale - no data in histogram")
                 self.log_y = False
             
-            # 设置对数轴
-            if self.log_x:
+            # 修复：对于横向直方图，log_x 和 log_y 都控制 X 轴（count轴）
+            # 只要任一启用，就使用对数刻度
+            if (self.log_x or self.log_y) and np.any(counts > 0):
                 self.ax3.set_xscale('log')
             else:
                 self.ax3.set_xscale('linear')
-                
-            if self.log_y and np.all(counts > 0):
-                self.ax3.set_yscale('log')
-            else:
-                self.ax3.set_yscale('linear')
+            
+            # 不要设置 ax3 的 Y 轴为对数刻度，因为这会影响与 ax2 共享的 amplitude 轴
             
             # 设置轴范围
             if len(highlighted_time) > 0:
@@ -499,7 +496,9 @@ class BasePlot(FigureCanvas):
         if self.log_x != enabled:
             self.log_x = enabled
             
-            if self.log_x:
+            # 修复：对于横向直方图，log_x 和 log_y 都控制 X 轴（count轴）
+            # 只要任一启用，就使用对数刻度
+            if self.log_x or self.log_y:
                 self.ax3.set_xscale('log')
             else:
                 self.ax3.set_xscale('linear')
@@ -518,10 +517,12 @@ class BasePlot(FigureCanvas):
                     self.log_y = False
                     return
             
-            if self.log_y:
-                self.ax3.set_yscale('log')
+            # 修复：对于横向直方图，log_x 和 log_y 都控制 X 轴（count轴）
+            # 只要任一启用，就使用对数刻度
+            if self.log_x or self.log_y:
+                self.ax3.set_xscale('log')
             else:
-                self.ax3.set_yscale('linear')
+                self.ax3.set_xscale('linear')
             
             self.draw()
     
@@ -619,11 +620,14 @@ class BasePlot(FigureCanvas):
                 
                 try:
                     counts, _ = np.histogram(highlighted_data, bins=self.bins)
-                    return np.all(counts > 0)
+                    # 修复：只要有任何一个bin有数据就可以使用对数刻度
+                    # matplotlib可以正确处理包含0值的直方图
+                    return np.any(counts > 0)
                 except:
                     return False
             else:
-                return np.all(self.hist_counts > 0)
+                # 修复：对于已有的hist_counts也使用更宽松的条件
+                return np.any(self.hist_counts > 0)
             
         except Exception as e:
             print(f"Error checking log scale validity: {e}")

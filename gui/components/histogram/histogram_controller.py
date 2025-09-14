@@ -46,6 +46,12 @@ class HistogramController:
         self.view.histogram_control.invert_data_changed.connect(self.on_invert_data_changed)
         self.view.histogram_control.clear_fits_requested.connect(self.on_clear_fits_requested)
         
+        # Cursor相关信号 - 新增：连接cursor位置更新信号
+        if hasattr(self.view, 'plot_canvas') and hasattr(self.view.plot_canvas, 'cursor_position_updated'):
+            self.view.plot_canvas.cursor_position_updated.connect(self.on_cursor_position_updated)
+        if hasattr(self.view, 'subplot3_canvas') and hasattr(self.view.subplot3_canvas, 'cursor_position_updated'):
+            self.view.subplot3_canvas.cursor_position_updated.connect(self.on_cursor_position_updated)
+        
         # 连接拟合信息面板的信号
         if hasattr(self.view, 'fit_info_panel'):
             # 注意：这些信号已经在signal_connector.py中连接了，所以这里不再重复连接
@@ -448,3 +454,12 @@ class HistogramController:
             self.view.subplot3_canvas.toggle_fit_labels(visible)
             status = "visible" if visible else "hidden"
             self.view.status_bar.showMessage(f"Fit labels are now {status}")
+    
+    def on_cursor_position_updated(self, cursor_id, new_position):
+        """处理cursor位置更新 - 实时更新cursor信息面板"""
+        # 更新cursor信息面板显示
+        if hasattr(self.view, 'update_cursor_info_panel'):
+            self.view.update_cursor_info_panel()
+        
+        # 更新状态栏显示（可选）
+        # self.view.status_bar.showMessage(f"Cursor {cursor_id} moved to {new_position:.4f}")

@@ -508,8 +508,8 @@ class BaselineCorrectionProcessor(DataProcessorBase):
         # 用整体数据减去拟合的斜率趋势（去趋势化处理）- 与用户参考代码一致
         if preserve_mean:
             original_mean = np.mean(data)
-            processed_data = data - fitted_line + original_mean
-            print(f"BASELINE_CORRECTION: 保持原始均值: {original_mean:.6f}")
+            processed_data = data - fitted_line + intercept
+            print(f"BASELINE_CORRECTION: 保持原始均值: {intercept:.6f}")
         else:
             processed_data = data - fitted_line
             print(f"BASELINE_CORRECTION: 直接减去基线")

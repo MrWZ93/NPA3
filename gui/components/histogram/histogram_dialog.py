@@ -95,6 +95,12 @@ class HistogramDialog(QDialog):
         # 连接cursor可见性切换信号
         if hasattr(self, 'cursor_info_panel'):
             self.cursor_info_panel.toggle_cursors_visibility_requested.connect(self.on_toggle_cursors_visibility)
+        
+        # 关键新增：连接cursor位置更新信号到本对话框的处理方法
+        if hasattr(self, 'plot_canvas') and hasattr(self.plot_canvas, 'cursor_position_updated'):
+            self.plot_canvas.cursor_position_updated.connect(self.on_cursor_position_updated)
+        if hasattr(self, 'subplot3_canvas') and hasattr(self.subplot3_canvas, 'cursor_position_updated'):
+            self.subplot3_canvas.cursor_position_updated.connect(self.on_cursor_position_updated)
     
     # ================ 核心业务方法 ================
     
@@ -337,13 +343,14 @@ class HistogramDialog(QDialog):
             self.status_bar.showMessage(f"Error clearing cursors: {str(e)}")
     
     def update_cursor_info_panel(self):
-        """更新cursor信息面板"""
+        """更新cursor信息面板 - 优化版，支持高频更新"""
         try:
             canvas = self.get_current_canvas()
             if canvas and hasattr(canvas, 'get_cursor_info'):
                 cursor_info = canvas.get_cursor_info()
                 # 在tab切换时强制更新，忽略跳过标志
                 force_update = True
+                # 使用强制更新模式实现实时更新
                 self.cursor_info_panel.refresh_cursor_list(cursor_info, force_update)
         except Exception as e:
             print(f"Error updating cursor info panel: {e}")
@@ -382,6 +389,14 @@ class HistogramDialog(QDialog):
         # 统一显示Y坐标，因为histogram中不显示cursor
         self.status_bar.showMessage(f"Cursor {cursor_id} moved to Y = {new_position:.4f}")
         self.update_cursor_info_panel()
+    
+    def on_cursor_position_updated(self, cursor_id, new_position):
+        """处理cursor位置实时更新 - 新方法"""
+        # 实时更新cursor信息面板
+        self.update_cursor_info_panel()
+        
+        # 可选：显示状态信息（但不要太频繁）
+        # self.status_bar.showMessage(f"Cursor {cursor_id}: {new_position:.4f}")
         
     def on_cursor_selection_changed(self, cursor_id):
         """Cursor选择变化处理"""

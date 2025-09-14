@@ -16,6 +16,7 @@ class CursorManager(QObject):
     # 定义信号
     cursor_deselected = pyqtSignal()
     cursor_selected = pyqtSignal(int)
+    cursor_position_updated = pyqtSignal(int, float)  # 新增：cursor位置更新信号 (cursor_id, new_position)
     
     def __init__(self, plot_canvas):
         super().__init__()
@@ -287,24 +288,66 @@ class CursorManager(QObject):
         finally:
             self.guard.set_updating("select_cursor", False)
     
-    def update_cursor_position(self, cursor_id, new_position):
-        """更新cursor位置"""
+    def update_cursor_position(self, cursor_id, new_position, fast_update=False):
+        """更新cursor位置 - 优化版，支持快速更新模式"""
         try:
             for cursor in self.cursors:
                 if cursor['id'] == cursor_id:
                     cursor['y_position'] = new_position
                     
-                    # 更新ax2中的线
-                    if 'line_ax2' in cursor and cursor['line_ax2']:
-                        cursor['line_ax2'].set_ydata([new_position, new_position])
+                    if fast_update:
+                        # 快速更新模式：直接修改现有线条的位置，不重建
+                        fast_update_success = True
+                        
+                        if 'line_ax2' in cursor and cursor['line_ax2']:
+                            try:
+                                cursor['line_ax2'].set_ydata([new_position, new_position])
+                            except Exception as e:
+                                print(f"Fast update failed for ax2: {e}")
+                                fast_update_success = False
+                                
+                        if 'line_ax3' in cursor and cursor['line_ax3']:
+                            try:
+                                cursor['line_ax3'].set_ydata([new_position, new_position])
+                            except Exception as e:
+                                print(f"Fast update failed for ax3: {e}")
+                                fast_update_success = False
+                        
+                        # 如果快速更新失败，降级到完整更新
+                        if not fast_update_success:
+                            fast_update = False
                     
-                    # 更新ax3中的线
-                    if 'line_ax3' in cursor and cursor['line_ax3']:
-                        cursor['line_ax3'].set_ydata([new_position, new_position])
+                    if not fast_update:
+                        # 完整更新模式：重建线条（用于非拖拽场景或快速更新失败）
+                        self._clear_single_cursor_lines(cursor)
+                        
+                        color = cursor['color']
+                        is_selected = cursor.get('selected', False)
+                        linewidth = 1.5 if is_selected else 0.8
+                        alpha = 0.9 if is_selected else 0.6
+                        
+                        # 在ax2中重新创建线条
+                        if hasattr(self.plot_canvas, 'ax2'):
+                            cursor['line_ax2'] = self.plot_canvas.ax2.axhline(
+                                y=new_position, color=color, 
+                                linestyle='--', linewidth=linewidth, 
+                                alpha=alpha, zorder=20,
+                                visible=self.cursors_visible
+                            )
+                        
+                        # 在ax3中重新创建线条
+                        if hasattr(self.plot_canvas, 'ax3'):
+                            cursor['line_ax3'] = self.plot_canvas.ax3.axhline(
+                                y=new_position, color=color, 
+                                linestyle='--', linewidth=linewidth, 
+                                alpha=alpha, zorder=20,
+                                visible=self.cursors_visible
+                            )
+                        
+                        cursor['histogram_line'] = None
                     
-                    # 更新直方图模式中的线
-                    if 'histogram_line' in cursor and cursor['histogram_line']:
-                        cursor['histogram_line'].set_xdata([new_position, new_position])
+                    # 发射cursor位置更新信号（简化版，无防护）
+                    self.cursor_position_updated.emit(cursor_id, new_position)
                     
                     return True
             
@@ -346,7 +389,8 @@ class CursorManager(QObject):
                 
             self.guard.set_updating("refresh_cursors_after_plot_update", True)
             
-            # 第0步：使用强制清理方法彻底清理所有cursor线条
+            # 加强版：每次刷新时都进行强制清理，防止残留虚线
+            print("[REFRESH_FIX] Starting enhanced cursor refresh with force cleanup...")
             self._clear_all_cursor_lines_from_axes()
             
             # 第1步：重新创建所有cursor线条
@@ -373,7 +417,7 @@ class CursorManager(QObject):
                         visible=self.cursors_visible
                     )
             
-            print(f"Refreshed {len(self.cursors)} cursors after plot update (completely rebuilt)")
+            print(f"[REFRESH_FIX] Enhanced refresh completed for {len(self.cursors)} cursors (completely rebuilt with force cleanup)")
                     
         except Exception as e:
             print(f"Error refreshing cursors after plot update: {e}")
@@ -381,6 +425,53 @@ class CursorManager(QObject):
             traceback.print_exc()
         finally:
             self.guard.set_updating("refresh_cursors_after_plot_update", False)
+    
+    def _clear_single_cursor_lines(self, cursor):
+        """清理单个cursor的所有线条"""
+        try:
+            # 清理ax2中的线
+            if 'line_ax2' in cursor and cursor['line_ax2']:
+                try:
+                    cursor['line_ax2'].remove()
+                    # 从 lines 列表中也移除
+                    if (hasattr(self.plot_canvas, 'ax2') and 
+                        hasattr(self.plot_canvas.ax2, 'lines') and 
+                        cursor['line_ax2'] in self.plot_canvas.ax2.lines):
+                        self.plot_canvas.ax2.lines.remove(cursor['line_ax2'])
+                except Exception as e:
+                    print(f"Error removing single cursor line from ax2: {e}")
+                cursor['line_ax2'] = None
+            
+            # 清理ax3中的线
+            if 'line_ax3' in cursor and cursor['line_ax3']:
+                try:
+                    cursor['line_ax3'].remove()
+                    # 从 lines 列表中也移除
+                    if (hasattr(self.plot_canvas, 'ax3') and 
+                        hasattr(self.plot_canvas.ax3, 'lines') and 
+                        cursor['line_ax3'] in self.plot_canvas.ax3.lines):
+                        self.plot_canvas.ax3.lines.remove(cursor['line_ax3'])
+                except Exception as e:
+                    print(f"Error removing single cursor line from ax3: {e}")
+                cursor['line_ax3'] = None
+            
+            # 清理histogram中的线
+            if 'histogram_line' in cursor and cursor['histogram_line']:
+                try:
+                    cursor['histogram_line'].remove()
+                    # 从 lines 列表中也移除
+                    if (hasattr(self.plot_canvas, 'ax') and 
+                        hasattr(self.plot_canvas.ax, 'lines') and 
+                        cursor['histogram_line'] in self.plot_canvas.ax.lines):
+                        self.plot_canvas.ax.lines.remove(cursor['histogram_line'])
+                except Exception as e:
+                    print(f"Error removing single cursor line from histogram ax: {e}")
+                cursor['histogram_line'] = None
+                
+        except Exception as e:
+            print(f"Error clearing single cursor lines: {e}")
+            import traceback
+            traceback.print_exc()
     
     def _clear_all_cursor_lines_from_axes(self):
         """彻底清理axes中所有cursor线条 - 强制清理方法"""
@@ -392,7 +483,7 @@ class CursorManager(QObject):
                 lines_before = len(self.plot_canvas.ax2.lines)
                 # 使用更强制的方式：直接遍历并移除所有虚线
                 lines_to_remove = []
-                for line in self.plot_canvas.ax2.lines:
+                for line in self.plot_canvas.ax2.lines[:]:
                     if (hasattr(line, 'get_linestyle') and 
                         line.get_linestyle() in ['--', 'dashed'] and
                         hasattr(line, 'get_zorder') and 
@@ -402,22 +493,21 @@ class CursorManager(QObject):
                 for line in lines_to_remove:
                     try:
                         line.remove()
-                    except:
-                        pass
-                
-                # 直接操作lines列表
-                self.plot_canvas.ax2.lines = [line for line in self.plot_canvas.ax2.lines 
-                                              if line not in lines_to_remove]
+                        # 从 lines 列表中也移除
+                        if line in self.plot_canvas.ax2.lines:
+                            self.plot_canvas.ax2.lines.remove(line)
+                    except Exception as e:
+                        print(f"Error removing line from ax2: {e}")
                 
                 lines_after = len(self.plot_canvas.ax2.lines)
                 print(f"ax2: Removed {lines_before - lines_after} cursor lines")
             
-            # 清理ax3中的所有虚线
+            # 清理ax3中的所有虚线 - 加强版
             if hasattr(self.plot_canvas, 'ax3') and hasattr(self.plot_canvas.ax3, 'lines'):
                 lines_before = len(self.plot_canvas.ax3.lines)
-                # 使用更强制的方式：直接遍历并移除所有虚线
+                # 先移除所有的虚线
                 lines_to_remove = []
-                for line in self.plot_canvas.ax3.lines:
+                for line in self.plot_canvas.ax3.lines[:]:
                     if (hasattr(line, 'get_linestyle') and 
                         line.get_linestyle() in ['--', 'dashed'] and
                         hasattr(line, 'get_zorder') and 
@@ -427,15 +517,41 @@ class CursorManager(QObject):
                 for line in lines_to_remove:
                     try:
                         line.remove()
-                    except:
-                        pass
-                
-                # 直接操作lines列表
-                self.plot_canvas.ax3.lines = [line for line in self.plot_canvas.ax3.lines 
-                                              if line not in lines_to_remove]
+                        # 从 lines 列表中也移除
+                        if line in self.plot_canvas.ax3.lines:
+                            self.plot_canvas.ax3.lines.remove(line)
+                    except Exception as e:
+                        print(f"Error removing line from ax3: {e}")
                 
                 lines_after = len(self.plot_canvas.ax3.lines)
                 print(f"ax3: Removed {lines_before - lines_after} cursor lines")
+            
+            # 加强版：清理在histogram模式下的self.ax中的cursor线条
+            if (hasattr(self.plot_canvas, 'ax') and 
+                hasattr(self.plot_canvas.ax, 'lines') and
+                hasattr(self.plot_canvas, 'is_histogram_mode') and
+                self.plot_canvas.is_histogram_mode):
+                
+                lines_before = len(self.plot_canvas.ax.lines)
+                lines_to_remove = []
+                for line in self.plot_canvas.ax.lines[:]:
+                    if (hasattr(line, 'get_linestyle') and 
+                        line.get_linestyle() in ['--', 'dashed'] and
+                        hasattr(line, 'get_zorder') and 
+                        line.get_zorder() >= 20):  # cursor线条通常有高zorder
+                        lines_to_remove.append(line)
+                
+                for line in lines_to_remove:
+                    try:
+                        line.remove()
+                        # 从 lines 列表中也移除
+                        if line in self.plot_canvas.ax.lines:
+                            self.plot_canvas.ax.lines.remove(line)
+                    except Exception as e:
+                        print(f"Error removing line from histogram ax: {e}")
+                
+                lines_after = len(self.plot_canvas.ax.lines)
+                print(f"histogram ax: Removed {lines_before - lines_after} cursor lines")
             
             # 清理cursor对象中的所有线条引用
             for cursor in self.cursors:
@@ -468,6 +584,27 @@ class CursorManager(QObject):
                         
         except Exception as e:
             print(f"Error refreshing cursors for histogram mode: {e}")
+            import traceback
+            traceback.print_exc()
+    
+    def force_clear_on_tab_switch(self):
+        """在tab切换时强制清理所有cursor线条 - 修复bug专用"""
+        try:
+            print("[TAB_SWITCH_FIX] Force clearing all cursor lines on tab switch...")
+            
+            # 调用强制清理方法
+            self._clear_all_cursor_lines_from_axes()
+            
+            # 确保所有cursor对象中的线条引用都被清除
+            for cursor in self.cursors:
+                cursor['line_ax2'] = None
+                cursor['line_ax3'] = None
+                cursor['histogram_line'] = None
+            
+            print(f"[TAB_SWITCH_FIX] Force cleared all cursor lines for {len(self.cursors)} cursors")
+            
+        except Exception as e:
+            print(f"[TAB_SWITCH_FIX] Error in force clear on tab switch: {e}")
             import traceback
             traceback.print_exc()
     
@@ -532,7 +669,7 @@ class CursorManager(QObject):
             self.guard.set_updating("mouse_press", False)
     
     def on_cursor_mouse_move(self, event):
-        """处理鼠标移动事件 - 在histogram模式下不响应"""
+        """处理鼠标移动事件 - 优化性能版"""
         if not self.dragging or not self.selected_cursor or not event.inaxes:
             return
         
@@ -544,18 +681,25 @@ class CursorManager(QObject):
             return
         
         try:
-            # 更新cursor位置
             new_y = event.ydata
             if new_y is not None:
-                self.update_cursor_position(self.selected_cursor['id'], new_y)
-                self.plot_canvas.draw()
+                # 使用快速更新模式，不重建线条
+                self.update_cursor_position(self.selected_cursor['id'], new_y, fast_update=True)
+                
+                # 使用轻量级重绘，只重绘变化的部分
+                self.plot_canvas.draw_idle()
                 
         except Exception as e:
             print(f"Error in cursor mouse move: {e}")
     
     def on_cursor_mouse_release(self, event):
-        """处理鼠标释放事件"""
+        """处理鼠标释放事件 - 拖拽结束后进行完整更新"""
         if self.dragging:
+            # 拖拽结束，进行一次完整更新确保状态正确
+            if self.selected_cursor and event.ydata is not None:
+                self.update_cursor_position(self.selected_cursor['id'], event.ydata, fast_update=False)
+                self.plot_canvas.draw_idle()
+            
             self.dragging = False
             self.drag_start_y = None
     

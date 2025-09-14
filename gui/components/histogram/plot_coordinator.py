@@ -20,6 +20,7 @@ class HistogramPlot(BasePlot):
     # 定义信号
     cursor_deselected = pyqtSignal()
     cursor_selected = pyqtSignal(int)
+    cursor_position_updated = pyqtSignal(int, float)  # 新增：cursor位置更新信号
     
     def __init__(self, parent=None, width=8, height=6, dpi=100):
         super().__init__(parent, width, height, dpi)
@@ -50,6 +51,7 @@ class HistogramPlot(BasePlot):
         # 连接cursor管理器信号
         self.cursor_manager.cursor_deselected.connect(self._on_cursor_deselected)
         self.cursor_manager.cursor_selected.connect(self._on_cursor_selected)
+        self.cursor_manager.cursor_position_updated.connect(self._on_cursor_position_updated)  # 新增：连接位置更新信号
         
         # 连接拟合管理器信号
         self.fitting_manager.region_selected.connect(self.region_selected)
@@ -71,6 +73,11 @@ class HistogramPlot(BasePlot):
                 self.cursor_selected.emit(cursor_id)
             finally:
                 self.guard.set_signal_emitting("cursor_selected_forward", False)
+    
+    def _on_cursor_position_updated(self, cursor_id, new_position):
+        """处理cursor位置更新信号 - 直接转发无防护"""
+        # 直接转发信号，去除防护机制以确保实时性
+        self.cursor_position_updated.emit(cursor_id, new_position)
     
     def _setup_context_menu(self):
         """设置右键菜单功能"""
@@ -472,7 +479,12 @@ class HistogramPlot(BasePlot):
         self.update_highlighted_plots(clear_fits=False)
         self.guard.throttled_draw(self)
     
-    def immediate_sync_to_main_view(self):
+    def force_clear_cursors_on_tab_switch(self):
+        """在tab切换时强制清理cursor - 修夏bug专用"""
+        if hasattr(self.cursor_manager, 'force_clear_on_tab_switch'):
+            self.cursor_manager.force_clear_on_tab_switch()
+            # 不立即重绘，等待tab切换完成后再重绘
+            print("[TAB_SWITCH_FIX] Called cursor force clear from plot coordinator")
         """立即同步拟合结果到主视图的subplot3"""
         if hasattr(self.fitting_manager, 'immediate_sync_to_main_view'):
             self.fitting_manager.immediate_sync_to_main_view()
@@ -533,3 +545,10 @@ class HistogramPlot(BasePlot):
     def fit_info_str(self):
         """获取拟合信息字符串 - 兼容性属性"""
         return self.fitting_manager.fit_info_str if hasattr(self.fitting_manager, 'fit_info_str') else "No fits yet"
+    
+    def force_clear_cursors_on_tab_switch(self):
+        """在tab切换时强制清理cursor - 修夏bug专用"""
+        if hasattr(self.cursor_manager, 'force_clear_on_tab_switch'):
+            self.cursor_manager.force_clear_on_tab_switch()
+            # 不立即重绘，等待tab切换完成后再重绘
+            print("[TAB_SWITCH_FIX] Called cursor force clear from plot coordinator")

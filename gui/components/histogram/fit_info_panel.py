@@ -203,45 +203,75 @@ class FitInfoPanel(QWidget):
         
         layout.addWidget(self.info_label)
         
-        # 拟合列表 - 设置适当的最小高度，确保可见性
+        # 拟合列表 - 设置适当的最小高度，去除最大高度限制以支持窗口拉伸
         self.fit_list = QListWidget()
         self.fit_list.setAlternatingRowColors(True)
         self.fit_list.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
         self.fit_list.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
-        self.fit_list.setMinimumHeight(100)  # 设置合适的最小高度
-        self.fit_list.setMaximumHeight(150)  # 设置最大高度，防止占用过多空间
+        self.fit_list.setMinimumHeight(120)  # 设置合适的最小高度
+        # 去除最大高度限制，让列表可以随窗口拉伸
         
-        layout.addWidget(self.fit_list, 2)  # 给列表分配权重
+        # 设置大小策略，支持伸缩
+        from PyQt6.QtWidgets import QSizePolicy
+        self.fit_list.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         
-        # 操作按钮区域 - 使用更紧凑的布局
+        layout.addWidget(self.fit_list, 1)  # 给列表分配最大权重
+        
+        # 操作按钮区域 - 使用更紧凑的布局，但给按钮更高的高度
         button_layout = QHBoxLayout()
-        button_layout.setSpacing(4)
+        button_layout.setSpacing(6)
+        button_layout.setContentsMargins(0, 8, 0, 8)  # 适当的上下边距
         
-        # 删除选中项按钮
+        # 更高的按钮样式 - 改善字体颜色对比度
+        button_style = """
+            QPushButton {
+                font-size: 10px;
+                padding: 8px 4px;
+                min-height: 24px;
+                max-height: 32px;
+                border-radius: 4px;
+                background-color: #f0f0f0;
+                border: 1px solid #d0d0d0;
+                color: #333333;  /* 深色字体，提高对比度 */
+            }
+            QPushButton:hover {
+                background-color: #e8e8e8;
+                border-color: #b0b0b0;
+                color: #222222;  /* 悬停时字体更深 */
+            }
+            QPushButton:pressed {
+                background-color: #d4d4d4;
+                color: #000000;  /* 按下时字体最深 */
+            }
+            QPushButton:disabled {
+                background-color: #f9f9f9;
+                color: #999999;
+            }
+        """
+        
+        # 删除选中项按钮 - 更高
         self.delete_selected_btn = QPushButton("Delete Selected")
         self.delete_selected_btn.setToolTip("Delete selected fit(s)")
         self.delete_selected_btn.setEnabled(False)  # 初始禁用
-        self.delete_selected_btn.setMaximumHeight(25)  # 限制按钮高度
-        self.delete_selected_btn.setStyleSheet("QPushButton { font-size: 9px; padding: 2px; }")
+        self.delete_selected_btn.setStyleSheet(button_style)
         
-        # 切换拟合标签可见性按钮
+        # 切换拟合标签可见性按钮 - 更高
         self.toggle_labels_btn = QPushButton("Hide Labels")
         self.toggle_labels_btn.setToolTip("Hide/Show fit labels in the plot")
         self.toggle_labels_btn.setCheckable(True)
-        self.toggle_labels_btn.setMaximumHeight(25)  # 限制按钮高度
-        self.toggle_labels_btn.setStyleSheet("QPushButton { font-size: 9px; padding: 2px; }")
+        self.toggle_labels_btn.setStyleSheet(button_style)
         
         # 添加按钮到布局
         button_layout.addWidget(self.delete_selected_btn)
         button_layout.addWidget(self.toggle_labels_btn)
         
-        layout.addLayout(button_layout)
+        layout.addLayout(button_layout, 0)  # 不给按钮区域分配伸缩权重，保持固定高度，不挤压列表
         
-        # 统计信息区域 - 设置合适的最小高度
+        # 统计信息区域 - 设置合适的固定高度，不让它占用过多空间
         self.stats_group = QGroupBox("Statistics")
         self.stats_group.setStyleSheet("QGroupBox { font-size: 10px; }")  # 减小字体
         self.stats_group.setMinimumHeight(60)  # 适当减小高度
-        self.stats_group.setMaximumHeight(100)  # 设置最大高度
+        self.stats_group.setMaximumHeight(80)  # 设置更小的最大高度，让更多空间给列表
         
         stats_layout = QVBoxLayout(self.stats_group)
         stats_layout.setContentsMargins(4, 4, 4, 4)  # 减少内边距
@@ -251,7 +281,7 @@ class FitInfoPanel(QWidget):
         self.stats_label.setStyleSheet("font-size: 9px;")  # 减小字体
         stats_layout.addWidget(self.stats_label)
         
-        layout.addWidget(self.stats_group, 1)  # 给统计信息分配权重
+        layout.addWidget(self.stats_group, 0)  # 不给统计信息分配伸缩权重，保持固定尺寸
         
         # 确保布局能够适应窗口大小变化
         layout.addStretch(0)  # 添加最小的伸缩空间

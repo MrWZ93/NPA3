@@ -391,12 +391,16 @@ class HistogramDialog(QDialog):
         self.update_cursor_info_panel()
     
     def on_cursor_position_updated(self, cursor_id, new_position):
-        """处理cursor位置实时更新 - 新方法"""
-        # 实时更新cursor信息面板
-        self.update_cursor_info_panel()
+        """处理cursor位置实时更新 - 节流优化版"""
+        # 节流更新：不要立即更新GUI，等待一段时间再更新
+        # 这样可以减少GUI更新的频率，提高拖拽性能
         
-        # 可选：显示状态信息（但不要太频繁）
-        # self.status_bar.showMessage(f"Cursor {cursor_id}: {new_position:.4f}")
+        # 直接调用控制器的节流更新方法
+        if hasattr(self, 'controller'):
+            self.controller.on_cursor_position_updated(cursor_id, new_position)
+        else:
+            # 如果控制器不可用，直接更新（但这种情况不应该发生）
+            self.update_cursor_info_panel()
         
     def on_cursor_selection_changed(self, cursor_id):
         """Cursor选择变化处理"""

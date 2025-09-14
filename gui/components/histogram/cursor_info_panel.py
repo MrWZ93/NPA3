@@ -39,16 +39,17 @@ class CursorInfoPanel(QWidget):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(8)  # 减小间距
         
-        # 操作按钮组 - 改为两行布局
-        button_group = QGroupBox("Cursor Management")
+        # 操作按钮组 - 改为两行布局，确保4个按钮完整显示
+        button_group = QGroupBox("Cursor Controls")
         button_group.setStyleSheet("""
             QGroupBox {
                 font-weight: bold;
                 font-size: 12px;
                 border: 1px solid #cccccc;
                 border-radius: 5px;
-                margin-top: 10px;
-                padding-top: 10px;
+                margin-top: 8px;
+                padding-top: 8px;
+                min-height: 80px;
             }
             QGroupBox::title {
                 subcontrol-origin: margin;
@@ -59,78 +60,80 @@ class CursorInfoPanel(QWidget):
         """)
         
         button_main_layout = QVBoxLayout()
-        button_main_layout.setSpacing(8)
-        button_main_layout.setContentsMargins(10, 10, 10, 10)
+        button_main_layout.setSpacing(10)  # 增大间距，防止按钮重叠
+        button_main_layout.setContentsMargins(8, 12, 8, 12)  # 增大内边距，给按钮更多空间
         
-        # 统一的按钮样式 - 减小字体和高度，确保等宽
+        # 统一的按钮样式 - 增强字体颜色对比度，调整高度
         button_style = """
             QPushButton {
                 background-color: #f5f5f5;
                 border: 1px solid #d0d0d0;
                 border-radius: 4px;
-                padding: 5px 6px;
-                font-size: 10px;
-                color: #333333;
+                padding: 6px 6px;
+                font-size: 11px;
+                color: #1a1a1a;
                 min-height: 14px;
-                max-height: 20px;
-                font-weight: normal;
+                max-height: 22px;
+                font-weight: 500;
             }
             QPushButton:hover {
                 background-color: #e8e8e8;
                 border-color: #b0b0b0;
+                color: #000000;
             }
             QPushButton:pressed {
                 background-color: #d4d4d4;
                 border-color: #888888;
+                color: #000000;
             }
             QPushButton:disabled {
                 background-color: #f9f9f9;
                 border-color: #e0e0e0;
-                color: #999999;
+                color: #666666;
             }
         """
         
-        # 第一行按钮：Add 和 Delete Selected
+        # 第一行按钮：Add 和 Delete Selected - 增大间距，避免重叠
         first_row_layout = QHBoxLayout()
-        first_row_layout.setSpacing(6)
+        first_row_layout.setSpacing(10)  # 增大按钮间距
         
         self.add_btn = QPushButton("Add")
         self.add_btn.setStyleSheet(button_style)
         self.add_btn.clicked.connect(self.add_cursor_requested.emit)
-        # 确保等宽
-        self.add_btn.setMinimumWidth(80)
-        self.add_btn.setMaximumWidth(80)
+        # 适中宽度，确保4个按钮都能显示
+        self.add_btn.setMinimumWidth(75)
+        self.add_btn.setMaximumWidth(75)
         first_row_layout.addWidget(self.add_btn)
         
         self.delete_selected_btn = QPushButton("Delete")
         self.delete_selected_btn.setStyleSheet(button_style)
         self.delete_selected_btn.clicked.connect(self.delete_selected_cursors)
         self.delete_selected_btn.setEnabled(False)
-        # 确保等宽
-        self.delete_selected_btn.setMinimumWidth(80)
-        self.delete_selected_btn.setMaximumWidth(80)
+        # 适中宽度，确保4个按钮都能显示
+        self.delete_selected_btn.setMinimumWidth(75)
+        self.delete_selected_btn.setMaximumWidth(75)
         first_row_layout.addWidget(self.delete_selected_btn)
         
         button_main_layout.addLayout(first_row_layout)
         
-        # 第二行按钮：Clear 和 Hide/Show
+        # 第二行按钮：Clear 和 Hide/Show - 增大间距，避免重叠
         second_row_layout = QHBoxLayout()
-        second_row_layout.setSpacing(6)
+        second_row_layout.setSpacing(10)  # 增大按钮间距
         
         self.clear_btn = QPushButton("Clear")
         self.clear_btn.setStyleSheet(button_style)
         self.clear_btn.clicked.connect(self.clear_cursors_requested.emit)
-        # 确保等宽
-        self.clear_btn.setMinimumWidth(80)
-        self.clear_btn.setMaximumWidth(80)
+        # 适中宽度，确保4个按钮都能显示
+        self.clear_btn.setMinimumWidth(75)
+        self.clear_btn.setMaximumWidth(75)
         second_row_layout.addWidget(self.clear_btn)
         
         self.toggle_visibility_btn = QPushButton("Hide")
         self.toggle_visibility_btn.setStyleSheet(button_style)
         self.toggle_visibility_btn.clicked.connect(self.toggle_cursors_visibility_requested.emit)
-        # 确保等宽
-        self.toggle_visibility_btn.setMinimumWidth(80)
-        self.toggle_visibility_btn.setMaximumWidth(80)
+        # 适中宽度，确保4个按钮都能显示
+        self.toggle_visibility_btn.setMinimumWidth(75)
+        self.toggle_visibility_btn.setMaximumWidth(75)
         second_row_layout.addWidget(self.toggle_visibility_btn)
         
         button_main_layout.addLayout(second_row_layout)
@@ -166,13 +169,13 @@ class CursorInfoPanel(QWidget):
         self.cursor_list.itemSelectionChanged.connect(self.on_selection_changed)
         self.cursor_list.itemClicked.connect(self.on_cursor_item_clicked)
         
-        # 设置合理的高度范围，避免过大
-        self.cursor_list.setMinimumHeight(120)  # 减小最小高度
-        self.cursor_list.setMaximumHeight(250)  # 减小最大高度
+        # 设置合理的高度范围，去除最大高度限制以支持窗口拉伸
+        self.cursor_list.setMinimumHeight(120)  # 保持最小高度
+        # 去除最大高度限制，让列表可以随窗口拉伸
         
         # 设置大小策略，让组件能够正确适应父容器
         from PyQt6.QtWidgets import QSizePolicy
-        self.cursor_list.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.MinimumExpanding)
+        self.cursor_list.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         self.cursor_list.setStyleSheet("""
             QListWidget {
                 border: 1px solid #cccccc;
@@ -194,9 +197,9 @@ class CursorInfoPanel(QWidget):
             }
         """)
         
-        cursor_list_layout.addWidget(self.cursor_list)
+        cursor_list_layout.addWidget(self.cursor_list, 1)  # 给cursor_list分配更大的权重，让它占据更多空间
         cursor_list_group.setLayout(cursor_list_layout)
-        layout.addWidget(cursor_list_group)
+        layout.addWidget(cursor_list_group, 1)  # 给cursor list组分配最大的伸缩权重
         
         # 位置控制组
         position_group = QGroupBox("Position Control")
@@ -245,7 +248,7 @@ class CursorInfoPanel(QWidget):
         
         position_layout.addLayout(pos_row)
         position_group.setLayout(position_layout)
-        layout.addWidget(position_group)
+        layout.addWidget(position_group, 0)  # 不给Position Control分配伸缩权重，保持固定尺寸
         
         # 统计信息
         self.stats_label = QLabel("Total Cursors: 0\nSelected: 0")
@@ -258,7 +261,7 @@ class CursorInfoPanel(QWidget):
             border-radius: 4px;
             background-color: #f9f9f9;
         """)
-        layout.addWidget(self.stats_label)
+        layout.addWidget(self.stats_label, 0)  # 不给统计信息分配伸缩权重，保持固定尺寸
         
         # 设置整个面板的大小策略，确保能够适应父容器
         from PyQt6.QtWidgets import QSizePolicy

@@ -100,6 +100,73 @@ class HistogramUIBuilder:
         panel.setLayout(layout)
         return panel
     
+    def _create_fit_results_section(self):
+        """创建拟合结果区域 - 上半部分"""
+        section = QWidget()
+        
+        layout = QVBoxLayout()
+        layout.setContentsMargins(*DialogConfig.PANEL_MARGINS)
+        layout.setSpacing(DialogConfig.PANEL_SPACING)
+        
+        # 标题组框
+        group = QGroupBox(UITexts.FIT_RESULTS)
+        group.setStyleSheet(StyleSheets.get_groupbox_style())
+        
+        group_layout = QVBoxLayout()
+        group_layout.setContentsMargins(*DialogConfig.GROUP_MARGINS)
+        group_layout.setSpacing(DialogConfig.GROUP_SPACING_MEDIUM)
+        
+        # 创建拟合信息面板（让它占据更多空间）
+        fit_info_panel = FitInfoPanel(self.dialog)
+        group_layout.addWidget(fit_info_panel, 1)  # 给予伸缩权重
+        
+        # Clear All按钮（固定尺寸）
+        clear_btn = QPushButton(UITexts.CLEAR_ALL_FITS)
+        clear_btn.setStyleSheet(StyleSheets.get_button_style('danger'))
+        clear_btn.setToolTip("Clear all Gaussian fits from the histogram")
+        group_layout.addWidget(clear_btn, 0)  # 不给予伸缩权重，保持固定尺寸
+        
+        group.setLayout(group_layout)
+        layout.addWidget(group)
+        
+        section.setLayout(layout)
+        
+        # 保存引用
+        self.dialog.fit_info_panel = fit_info_panel
+        self.dialog.clear_all_btn = clear_btn
+        
+        return section
+    
+    def _create_cursor_section(self):
+        """创建cursor管理区域 - 下半部分"""
+        section = QWidget()
+        
+        layout = QVBoxLayout()
+        layout.setContentsMargins(*DialogConfig.PANEL_MARGINS)
+        layout.setSpacing(DialogConfig.PANEL_SPACING)
+        
+        # 标题组框
+        group = QGroupBox(UITexts.CURSOR_MANAGEMENT)
+        group.setStyleSheet(StyleSheets.get_groupbox_style())
+        
+        group_layout = QVBoxLayout()
+        group_layout.setContentsMargins(*DialogConfig.GROUP_MARGINS)
+        group_layout.setSpacing(DialogConfig.GROUP_SPACING_MEDIUM)
+        
+        # 创建cursor信息面板（让它占据更多空间）
+        cursor_info_panel = CursorInfoPanel(self.dialog)
+        group_layout.addWidget(cursor_info_panel, 1)  # 给予伸缩权重
+        
+        group.setLayout(group_layout)
+        layout.addWidget(group)
+        
+        section.setLayout(layout)
+        
+        # 保存引用
+        self.dialog.cursor_info_panel = cursor_info_panel
+        
+        return section
+    
     def _create_file_control_group(self):
         """创建文件控制组"""
         group = QGroupBox(UITexts.FILE_CONTROL)
@@ -244,26 +311,51 @@ class HistogramUIBuilder:
         return tab
     
     def _build_right_panel(self):
-        """构建右侧面板"""
+        """构建右侧面板 - 优化版，上下分割布局"""
         panel = QWidget()
         panel.setFixedWidth(DialogConfig.SIDE_PANEL_WIDTH)
         
-        layout = QVBoxLayout()
-        layout.setContentsMargins(*DialogConfig.PANEL_MARGINS)
-        layout.setSpacing(DialogConfig.PANEL_SPACING)
+        # 使用垂直分割器将右侧面板分为上下两部分
+        splitter = QSplitter(Qt.Orientation.Vertical)
+        splitter.setHandleWidth(8)  # 设置分割柄宽度
         
-        # Fit Results组 - 增加高度分配
-        fit_group = self._create_fit_results_group()
-        layout.addWidget(fit_group, 3)  # 分配权重3
+        # 设置分割器样式，使其更美观
+        splitter.setStyleSheet("""
+            QSplitter::handle {
+                background-color: #e0e0e0;
+                border: 1px solid #c0c0c0;
+                border-radius: 2px;
+            }
+            QSplitter::handle:hover {
+                background-color: #d0d0d0;
+            }
+            QSplitter::handle:pressed {
+                background-color: #b0b0b0;
+            }
+        """)
         
-        # Cursors组 - 增加高度分配
-        cursor_group = self._create_cursor_control_group()
-        layout.addWidget(cursor_group, 2)  # 分配权重2
+        # 上半部分：Gaussian Fit Results
+        fit_results_section = self._create_fit_results_section()
+        splitter.addWidget(fit_results_section)
         
-        # 减少弹性空间，让组件占用更多高度
-        layout.addStretch(1)  # 只给少量弹性空间
+        # 下半部分：Cursor Management
+        cursor_section = self._create_cursor_section()
+        splitter.addWidget(cursor_section)
         
-        panel.setLayout(layout)
+        # 设置初始比例：上半60%，下半40%
+        splitter.setSizes([300, 200])  # 高度比例约为3:2
+        
+        # 设置伸缩因子，使两部分都可以随窗口拉伸
+        splitter.setStretchFactor(0, 3)  # 上半部分权重3
+        splitter.setStretchFactor(1, 2)  # 下半部分权重2
+        
+        # 主布局
+        main_layout = QVBoxLayout()
+        main_layout.setContentsMargins(0, 0, 0, 0)
+        main_layout.setSpacing(0)
+        main_layout.addWidget(splitter)
+        
+        panel.setLayout(main_layout)
         return panel
     
     def _create_fit_results_group(self):

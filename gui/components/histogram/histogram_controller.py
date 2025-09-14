@@ -22,6 +22,13 @@ class HistogramController:
         self.data_manager = data_manager
         self.view = view
         
+        # 性能优化：cursor位置更新节流
+        from PyQt6.QtCore import QTimer
+        self._cursor_update_timer = QTimer()
+        self._cursor_update_timer.setSingleShot(True)
+        self._cursor_update_timer.timeout.connect(self._delayed_cursor_update)
+        self._pending_cursor_updates = {}  # {cursor_id: position}
+        
         # 连接视图的信号到控制器的方法
         self._connect_signals()
     
@@ -456,10 +463,24 @@ class HistogramController:
             self.view.status_bar.showMessage(f"Fit labels are now {status}")
     
     def on_cursor_position_updated(self, cursor_id, new_position):
-        """处理cursor位置更新 - 实时更新cursor信息面板"""
-        # 更新cursor信息面板显示
-        if hasattr(self.view, 'update_cursor_info_panel'):
-            self.view.update_cursor_info_panel()
+        """处理cursor位置更新 - 节流优化版，减少GUI更新频率"""
+        # 将更新请求放入待处理队列
+        self._pending_cursor_updates[cursor_id] = new_position
         
-        # 更新状态栏显示（可选）
-        # self.view.status_bar.showMessage(f"Cursor {cursor_id} moved to {new_position:.4f}")
+        # 设置节流定时器，100ms后才更新GUI（避免过于频繁的更新）
+        if not self._cursor_update_timer.isActive():
+            self._cursor_update_timer.start(50)  # 50ms节流
+    
+    def _delayed_cursor_update(self):
+        """延迟的cursor位置更新，用于节流GUI更新"""
+        if self._pending_cursor_updates and hasattr(self.view, 'update_cursor_info_panel'):
+            # 一次性处理所有待更新的cursor
+            self.view.update_cursor_info_panel()
+            
+            # 清除待处理队列
+            self._pending_cursor_updates.clear()
+            
+            # 可选：更新状态栏（但不要太频繁）
+            # if len(self._pending_cursor_updates) == 1:
+            #     cursor_id, position = list(self._pending_cursor_updates.items())[0]
+            #     self.view.status_bar.showMessage(f"Cursor {cursor_id}: {position:.4f}")

@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Cursor Manager - Cursor管理器
-负责管理直方图中的cursor功能
+Cursor Manager - Cursor管理器（性能优化版本）
+负责管理直方图中的cursor功能，集成blitting优化技术
+🚀 性能提升：像subplot1高亮区域一样流畅的cursor拖拽
 """
 
 import numpy as np
@@ -11,12 +12,12 @@ from .plot_utils import ColorManager, RecursionGuard
 
 
 class CursorManager(QObject):
-    """Cursor管理器类"""
+    """Cursor管理器类 - 性能优化版本"""
     
     # 定义信号
     cursor_deselected = pyqtSignal()
     cursor_selected = pyqtSignal(int)
-    cursor_position_updated = pyqtSignal(int, float)  # 新增：cursor位置更新信号 (cursor_id, new_position)
+    cursor_position_updated = pyqtSignal(int, float)  # cursor位置更新信号
     
     def __init__(self, plot_canvas):
         super().__init__()
@@ -32,6 +33,18 @@ class CursorManager(QObject):
         
         # 添加cursor可见性控制
         self.cursors_visible = True
+        
+        # 🚀 性能优化：拖拽时的blitting重绘（参考subplot1高亮区域）
+        from PyQt6.QtCore import QTimer
+        self._drag_update_timer = QTimer()
+        self._drag_update_timer.setSingleShot(True)
+        self._drag_update_timer.timeout.connect(self._delayed_drag_update)
+        self._pending_drag_position = None
+        
+        # 🎯 Blitting优化变量 - 关键性能提升
+        self._drag_backgrounds = {}  # 保存各个axes的背景
+        self._is_blitting = False
+        self._last_drag_position = None
         
         # 连接鼠标事件
         self.plot_canvas.mpl_connect('button_press_event', self.on_cursor_mouse_press)
@@ -109,6 +122,276 @@ class CursorManager(QObject):
             return None
         finally:
             self.guard.set_updating("add_cursor", False)
+    
+    # 🚀 ========== 性能优化核心方法 ==========
+    
+    def _setup_blitting(self):
+        """设置blitting优化 - 保存干净背景（不包含要拖拽的cursor）🎯 解决双cursor问题"""
+        try:
+            self._is_blitting = False
+            self._drag_backgrounds.clear()
+            
+            if not self.selected_cursor:
+                return
+            
+            # 🎯 关键修复：先隐藏要拖拽的cursor，保存干净背景
+            original_visibility = {}
+            
+            # 隐藏ax2中的cursor线条
+            if 'line_ax2' in self.selected_cursor and self.selected_cursor['line_ax2']:
+                line = self.selected_cursor['line_ax2']
+                original_visibility['ax2'] = line.get_visible()
+                line.set_visible(False)
+            
+            # 隐藏ax3中的cursor线条
+            if 'line_ax3' in self.selected_cursor and self.selected_cursor['line_ax3']:
+                line = self.selected_cursor['line_ax3']
+                original_visibility['ax3'] = line.get_visible()
+                line.set_visible(False)
+            
+            # 确保 canvas 已经绘制完成（现在背景是干净的）
+            self.plot_canvas.draw()
+            
+            # 保存干净的ax2背景
+            if hasattr(self.plot_canvas, 'ax2') and self.plot_canvas.ax2:
+                try:
+                    bbox = self.plot_canvas.ax2.bbox
+                    self._drag_backgrounds['ax2'] = self.plot_canvas.copy_from_bbox(bbox)
+                except Exception as e:
+                    print(f"Failed to save ax2 background: {e}")
+            
+            # 保存干净的ax3背景
+            if hasattr(self.plot_canvas, 'ax3') and self.plot_canvas.ax3:
+                try:
+                    bbox = self.plot_canvas.ax3.bbox
+                    self._drag_backgrounds['ax3'] = self.plot_canvas.copy_from_bbox(bbox)
+                except Exception as e:
+                    print(f"Failed to save ax3 background: {e}")
+            
+            # 恢复cursor的可见性（但不重绘，因为我们已经保存了干净背景）
+            if 'line_ax2' in self.selected_cursor and self.selected_cursor['line_ax2']:
+                self.selected_cursor['line_ax2'].set_visible(original_visibility.get('ax2', True))
+            if 'line_ax3' in self.selected_cursor and self.selected_cursor['line_ax3']:
+                self.selected_cursor['line_ax3'].set_visible(original_visibility.get('ax3', True))
+            
+            self._is_blitting = len(self._drag_backgrounds) > 0
+            print(f"🚀 Blitting setup: {'successful' if self._is_blitting else 'failed'} with {len(self._drag_backgrounds)} clean backgrounds")
+            
+        except Exception as e:
+            print(f"Error setting up blitting: {e}")
+            self._is_blitting = False
+    
+    def _update_cursor_with_blitting(self, new_y):
+        """使用blitting优化更新cursor位置 - 🎯 高性能模式（只显示一个cursor）"""
+        try:
+            # 更新数据
+            self.selected_cursor['y_position'] = new_y
+            
+            updated_any = False
+            
+            # 更新 ax2 中的cursor
+            if ('ax2' in self._drag_backgrounds and 
+                'line_ax2' in self.selected_cursor and 
+                self.selected_cursor['line_ax2']):
+                
+                try:
+                    # 恢复干净背景（不包含cursor）
+                    self.plot_canvas.restore_region(self._drag_backgrounds['ax2'])
+                    
+                    # 更新cursor线条到新位置
+                    line = self.selected_cursor['line_ax2']
+                    line.set_ydata([new_y, new_y])
+                    
+                    # 只绘制这一个cursor（在干净背景上）
+                    self.plot_canvas.ax2.draw_artist(line)
+                    
+                    # 更新显示
+                    bbox = self.plot_canvas.ax2.bbox
+                    self.plot_canvas.blit(bbox)
+                    
+                    updated_any = True
+                    
+                except Exception as e:
+                    print(f"Error blitting ax2: {e}")
+            
+            # 更新 ax3 中的cursor
+            if ('ax3' in self._drag_backgrounds and 
+                'line_ax3' in self.selected_cursor and 
+                self.selected_cursor['line_ax3']):
+                
+                try:
+                    # 恢复干净背景（不包含cursor）
+                    self.plot_canvas.restore_region(self._drag_backgrounds['ax3'])
+                    
+                    # 更新cursor线条到新位置
+                    line = self.selected_cursor['line_ax3']
+                    line.set_ydata([new_y, new_y])
+                    
+                    # 只绘制这一个cursor（在干净背景上）
+                    self.plot_canvas.ax3.draw_artist(line)
+                    
+                    # 更新显示
+                    bbox = self.plot_canvas.ax3.bbox
+                    self.plot_canvas.blit(bbox)
+                    
+                    updated_any = True
+                    
+                except Exception as e:
+                    print(f"Error blitting ax3: {e}")
+            
+            if not updated_any:
+                # 如果blitting失败，降级到普通更新
+                self._update_cursor_fallback(new_y)
+                
+        except Exception as e:
+            print(f"Error in blitting update: {e}")
+            # 如果blitting失败，降级到普通更新
+            self._update_cursor_fallback(new_y)
+    
+    def _update_cursor_fallback(self, new_y):
+        """普通更新模式（降级版本）- 优化后的节流更新"""
+        try:
+            # 更新数据
+            self.selected_cursor['y_position'] = new_y
+            
+            # 更新线条位置
+            if 'line_ax2' in self.selected_cursor and self.selected_cursor['line_ax2']:
+                self.selected_cursor['line_ax2'].set_ydata([new_y, new_y])
+            if 'line_ax3' in self.selected_cursor and self.selected_cursor['line_ax3']:
+                self.selected_cursor['line_ax3'].set_ydata([new_y, new_y])
+            
+            # 使用较低频率的节流重绘（参考subplot1的50ms）
+            self._pending_drag_position = new_y
+            if not self._drag_update_timer.isActive():
+                self._drag_update_timer.start(50)  # 50ms ≈ 20fps，参考subplot1
+                
+        except Exception as e:
+            print(f"Error in fallback update: {e}")
+    
+    def _cleanup_blitting(self):
+        """清理blitting状态"""
+        try:
+            self._is_blitting = False
+            self._drag_backgrounds.clear()
+            self._last_drag_position = None
+            print("🧹 Blitting cleanup completed")
+        except Exception as e:
+            print(f"Error cleaning up blitting: {e}")
+    
+    def _delayed_drag_update(self):
+        """延迟的拖拽更新，用于节流重绘"""
+        if self._pending_drag_position is not None and self.dragging:
+            try:
+                # 使用matplotlib的最优化重绘方式
+                self.plot_canvas.draw_idle()
+                    
+                # 清除待处理位置
+                self._pending_drag_position = None
+            except Exception as e:
+                print(f"Error in delayed drag update: {e}")
+                self._pending_drag_position = None
+    
+    # 🎯 ========== 优化的鼠标事件处理 ==========
+    
+    def on_cursor_mouse_press(self, event):
+        """处理鼠标按下事件 - 添加防护，在histogram模式下不响应"""
+        if not event.inaxes or self.guard.is_updating("mouse_press"):
+            return
+        
+        # 在histogram模式下不响应cursor点击，因为cursor不可见
+        if (hasattr(self.plot_canvas, 'is_histogram_mode') and 
+            self.plot_canvas.is_histogram_mode and 
+            hasattr(self.plot_canvas, 'ax') and 
+            event.inaxes == self.plot_canvas.ax):
+            print("Cursor interaction disabled in histogram mode")
+            return
+        
+        try:
+            self.guard.set_updating("mouse_press", True)
+            
+            # 检查是否点击在cursor附近
+            clicked_cursor = self._find_cursor_near_click(event)
+            
+            if clicked_cursor:
+                # 选中cursor并开始拖拽
+                self.select_cursor(clicked_cursor['id'])
+                self.dragging = True
+                self.drag_start_y = event.ydata
+                # 🚀 初始化blitting优化
+                self._setup_blitting()
+            else:
+                # 点击空白处，取消选择
+                self.select_cursor(None)
+                
+        except Exception as e:
+            print(f"Error in cursor mouse press: {e}")
+        finally:
+            self.guard.set_updating("mouse_press", False)
+    
+    def on_cursor_mouse_move(self, event):
+        """处理鼠标移动事件 - 🚀 Blitting优化版（高性能）"""
+        if not self.dragging or not self.selected_cursor or not event.inaxes:
+            return
+        
+        # 在histogram模式下不响应cursor拖拽，因为cursor不可见
+        if (hasattr(self.plot_canvas, 'is_histogram_mode') and 
+            self.plot_canvas.is_histogram_mode and 
+            hasattr(self.plot_canvas, 'ax') and 
+            event.inaxes == self.plot_canvas.ax):
+            return
+        
+        try:
+            new_y = event.ydata
+            if new_y is not None and new_y != self._last_drag_position:
+                self._last_drag_position = new_y
+                
+                # 🎯 使用blitting优化的拖拽更新
+                if self._is_blitting:
+                    self._update_cursor_with_blitting(new_y)
+                else:
+                    # 降级到普通更新模式
+                    self._update_cursor_fallback(new_y)
+                
+        except Exception as e:
+            print(f"Error in cursor mouse move: {e}")
+    
+    def on_cursor_mouse_release(self, event):
+        """处理鼠标释放事件 - 拖拽结束后进行完整更新和信号发射"""
+        if self.dragging:
+            # 停止节流定时器
+            self._drag_update_timer.stop()
+            self._pending_drag_position = None
+            
+            # 🧹 清理blitting状态
+            self._cleanup_blitting()
+            
+            # 拖拽结束，进行一次完整更新确保状态正确
+            if self.selected_cursor and event.ydata is not None:
+                cursor_id = self.selected_cursor['id']
+                final_position = event.ydata
+                
+                # 确保数据一致性
+                self.selected_cursor['y_position'] = final_position
+                
+                # 更新线条位置到最终位置
+                if 'line_ax2' in self.selected_cursor and self.selected_cursor['line_ax2']:
+                    self.selected_cursor['line_ax2'].set_ydata([final_position, final_position])
+                if 'line_ax3' in self.selected_cursor and self.selected_cursor['line_ax3']:
+                    self.selected_cursor['line_ax3'].set_ydata([final_position, final_position])
+                
+                # 只在拖拽结束时发射信号和重绘
+                self.cursor_position_updated.emit(cursor_id, final_position)
+                
+                # 使用轻量级重绘
+                self.plot_canvas.draw_idle()
+                
+                print(f"Cursor {cursor_id} drag completed at position {final_position:.4f}")
+            
+            self.dragging = False
+            self.drag_start_y = None
+            self._last_drag_position = None
+    
+    # ========== 原有的Cursor管理方法（保持不变）==========
     
     def set_cursors_visible(self, visible):
         """设置cursor的可见性"""
@@ -634,74 +917,6 @@ class CursorManager(QObject):
         self.cursor_counter = len(self.cursors)
         
         print(f"Reordered cursors: {[c['id'] for c in cursors_sorted]}")
-    
-    def on_cursor_mouse_press(self, event):
-        """处理鼠标按下事件 - 添加防护，在histogram模式下不响应"""
-        if not event.inaxes or self.guard.is_updating("mouse_press"):
-            return
-        
-        # 在histogram模式下不响应cursor点击，因为cursor不可见
-        if (hasattr(self.plot_canvas, 'is_histogram_mode') and 
-            self.plot_canvas.is_histogram_mode and 
-            hasattr(self.plot_canvas, 'ax') and 
-            event.inaxes == self.plot_canvas.ax):
-            print("Cursor interaction disabled in histogram mode")
-            return
-        
-        try:
-            self.guard.set_updating("mouse_press", True)
-            
-            # 检查是否点击在cursor附近
-            clicked_cursor = self._find_cursor_near_click(event)
-            
-            if clicked_cursor:
-                # 选中cursor并开始拖拽
-                self.select_cursor(clicked_cursor['id'])
-                self.dragging = True
-                self.drag_start_y = event.ydata
-            else:
-                # 点击空白处，取消选择
-                self.select_cursor(None)
-                
-        except Exception as e:
-            print(f"Error in cursor mouse press: {e}")
-        finally:
-            self.guard.set_updating("mouse_press", False)
-    
-    def on_cursor_mouse_move(self, event):
-        """处理鼠标移动事件 - 优化性能版"""
-        if not self.dragging or not self.selected_cursor or not event.inaxes:
-            return
-        
-        # 在histogram模式下不响应cursor拖拽，因为cursor不可见
-        if (hasattr(self.plot_canvas, 'is_histogram_mode') and 
-            self.plot_canvas.is_histogram_mode and 
-            hasattr(self.plot_canvas, 'ax') and 
-            event.inaxes == self.plot_canvas.ax):
-            return
-        
-        try:
-            new_y = event.ydata
-            if new_y is not None:
-                # 使用快速更新模式，不重建线条
-                self.update_cursor_position(self.selected_cursor['id'], new_y, fast_update=True)
-                
-                # 使用轻量级重绘，只重绘变化的部分
-                self.plot_canvas.draw_idle()
-                
-        except Exception as e:
-            print(f"Error in cursor mouse move: {e}")
-    
-    def on_cursor_mouse_release(self, event):
-        """处理鼠标释放事件 - 拖拽结束后进行完整更新"""
-        if self.dragging:
-            # 拖拽结束，进行一次完整更新确保状态正确
-            if self.selected_cursor and event.ydata is not None:
-                self.update_cursor_position(self.selected_cursor['id'], event.ydata, fast_update=False)
-                self.plot_canvas.draw_idle()
-            
-            self.dragging = False
-            self.drag_start_y = None
     
     def _find_cursor_near_click(self, event):
         """查找点击位置附近的cursor（优化精度）"""

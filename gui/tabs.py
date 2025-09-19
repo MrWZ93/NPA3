@@ -536,6 +536,29 @@ class ProcessingTab(QWidget):
             time_range_label.setStyleSheet("color: #0078d7; font-style: italic;")
             self.params_layout.addRow("", time_range_label)
             
+            # 剪切模式选择
+            trim_mode_combo = QComboBox()
+            trim_mode_combo.addItems(["Positive Trim (Keep interval)", "Negative Trim (Remove interval)"])
+            trim_mode_combo.setCurrentIndex(0)  # 默认正剪切
+            trim_mode_combo.setMinimumWidth(200)
+            trim_mode_combo.currentIndexChanged.connect(self._on_trim_mode_changed)
+            self.params_layout.addRow("Trim Mode:", trim_mode_combo)
+            self.param_widgets["trim_mode"] = trim_mode_combo
+            
+            # 负剪切策略选择（初始隐藏）
+            negative_strategy_combo = QComboBox()
+            negative_strategy_combo.addItems(["Smart Fill (Default)", "Delete & Shift"])
+            negative_strategy_combo.setCurrentIndex(0)  # 默认智能填补
+            negative_strategy_combo.setMinimumWidth(200)
+            negative_strategy_combo.setVisible(False)  # 初始隐藏
+            
+            # 创建标签用于控制显示/隐藏
+            self.negative_strategy_label = QLabel("Negative Strategy:")
+            self.negative_strategy_label.setVisible(False)  # 初始隐藏
+            
+            self.params_layout.addRow(self.negative_strategy_label, negative_strategy_combo)
+            self.param_widgets["negative_strategy"] = negative_strategy_combo
+            
             # 时间范围输入控件
             start_spin = QDoubleSpinBox()
             start_spin.setRange(0, 1000000)
@@ -701,6 +724,19 @@ class ProcessingTab(QWidget):
             self.fit_start_label.setVisible(True)
             self.fit_end_label.setVisible(True)
     
+    def _on_trim_mode_changed(self, index):
+        """剪切模式变更处理"""
+        if index == 0:  # 正剪切模式
+            # 隐藏负剪切策略选择
+            if hasattr(self, 'negative_strategy_label'):
+                self.negative_strategy_label.setVisible(False)
+                self.param_widgets["negative_strategy"].setVisible(False)
+        else:  # 负剪切模式
+            # 显示负剪切策略选择
+            if hasattr(self, 'negative_strategy_label'):
+                self.negative_strategy_label.setVisible(True)
+                self.param_widgets["negative_strategy"].setVisible(True)
+    
     def get_parameters(self):
         """获取当前参数设置"""
         if not self.current_operation:
@@ -733,6 +769,12 @@ class ProcessingTab(QWidget):
                 elif key == "baseline_method":  # Special handling for baseline method selection
                     method_index = widget.currentIndex()
                     params[key] = "first_n_seconds" if method_index == 0 else "time_range"
+                elif key == "trim_mode":  # Special handling for trim mode selection
+                    mode_index = widget.currentIndex()
+                    params[key] = "positive" if mode_index == 0 else "negative"
+                elif key == "negative_strategy":  # Special handling for negative strategy selection
+                    strategy_index = widget.currentIndex()
+                    params[key] = "smart_fill" if strategy_index == 0 else "delete_shift"
                 else:
                     data_index = widget.currentIndex()
                     params[key] = widget.itemData(data_index)

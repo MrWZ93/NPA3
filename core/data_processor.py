@@ -105,7 +105,7 @@ class DataProcessorBase:
 
 
 class TrimProcessor(DataProcessorBase):
-    """数据裁切处理器"""
+    """数据裁切处理器 - 支持正剪切和负剪切"""
     
     def process(self, data, params, current_time_axis=None):
         """执行数据裁切"""
@@ -113,8 +113,12 @@ class TrimProcessor(DataProcessorBase):
         end_time = params.get("end_time", 10.0)
         sampling_rate = params.get("sampling_rate", self.sampling_rate)
         selected_channel = params.get("channel", None)
+        trim_mode = params.get("trim_mode", "positive")  # 默认正剪切
+        negative_strategy = params.get("negative_strategy", "smart_fill")  # 默认智能填补
         
-        print(f"TRIM: Operation=trim, start_time={start_time}, end_time={end_time}")
+        print(f"TRIM: Operation=trim, mode={trim_mode}, start_time={start_time}, end_time={end_time}")
+        if trim_mode == "negative":
+            print(f"TRIM: Negative strategy={negative_strategy}")
         
         processed_data = {}
         
@@ -123,15 +127,37 @@ class TrimProcessor(DataProcessorBase):
             channels_to_process = [selected_channel] if selected_channel else data.keys()
             has_time_channel = "Time" in data
             
+            # 如果没有Time通道但有current_time_axis，且是正剪切，需要创建保持原始时间轴的Time通道
+            if not has_time_channel and current_time_axis is not None and trim_mode == "positive":
+                # 计算裁切区间的索引
+                start_indices = np.where(current_time_axis >= start_time)[0]
+                end_indices = np.where(current_time_axis <= end_time)[0]
+                
+                if len(start_indices) > 0 and len(end_indices) > 0:
+                    start_sample = start_indices[0]
+                    end_sample = end_indices[-1] + 1
+                    
+                    # 创建保持原始时间值的Time通道
+                    trimmed_time_axis = current_time_axis[start_sample:end_sample]
+                    processed_data["Time"] = trimmed_time_axis
+                    print(f"TRIM: Created Time channel with original time values: {trimmed_time_axis[0]:.3f}s - {trimmed_time_axis[-1]:.3f}s")
+            
             for channel in data.keys():
                 channel_data = data[channel]
                 
                 if channel in channels_to_process or channel == "Time":
                     if isinstance(channel_data, np.ndarray):
-                        processed_data[channel] = self._trim_channel_data(
-                            channel, channel_data, start_time, end_time, 
-                            sampling_rate, current_time_axis, has_time_channel, data
-                        )
+                        if trim_mode == "positive":
+                            processed_data[channel] = self._positive_trim_channel_data(
+                                channel, channel_data, start_time, end_time, 
+                                sampling_rate, current_time_axis, has_time_channel, data
+                            )
+                        else:  # negative trim
+                            processed_data[channel] = self._negative_trim_channel_data(
+                                channel, channel_data, start_time, end_time,
+                                sampling_rate, current_time_axis, has_time_channel, data,
+                                negative_strategy
+                            )
                     else:
                         processed_data[channel] = channel_data
                 else:
@@ -139,14 +165,36 @@ class TrimProcessor(DataProcessorBase):
         
         elif isinstance(data, np.ndarray):
             # 处理NumPy数组格式数据
-            processed_data = self._trim_array_data(data, start_time, end_time, sampling_rate)
+            if trim_mode == "positive":
+                processed_data = self._positive_trim_array_data(data, start_time, end_time, sampling_rate)
+                
+                # 如果有current_time_axis，也需要保持原始时间轴
+                if current_time_axis is not None:
+                    start_indices = np.where(current_time_axis >= start_time)[0]
+                    end_indices = np.where(current_time_axis <= end_time)[0]
+                    
+                    if len(start_indices) > 0 and len(end_indices) > 0:
+                        start_sample = start_indices[0]
+                        end_sample = end_indices[-1] + 1
+                        trimmed_time_axis = current_time_axis[start_sample:end_sample]
+                        
+                        # 返回字典格式以包含时间轴
+                        processed_data = {
+                            "Time": trimmed_time_axis,
+                            "Data": processed_data
+                        }
+                        print(f"TRIM: Added Time channel with original time values: {trimmed_time_axis[0]:.3f}s - {trimmed_time_axis[-1]:.3f}s")
+            else:  # negative trim
+                processed_data = self._negative_trim_array_data(
+                    data, start_time, end_time, sampling_rate, current_time_axis, negative_strategy
+                )
         
         return processed_data
     
-    def _trim_channel_data(self, channel, data, start_time, end_time, sampling_rate, 
+    def _positive_trim_channel_data(self, channel, data, start_time, end_time, sampling_rate, 
                           current_time_axis, has_time_channel, all_data):
-        """裁切单个通道数据"""
-        print(f"TRIM: Processing channel={channel}, data_length={len(data)}")
+        """正剪切：保留指定区间内的数据，保持原始时间轴"""
+        print(f"POSITIVE_TRIM: Processing channel={channel}, data_length={len(data)}")
         
         if current_time_axis is not None and len(current_time_axis) == len(data):
             # 使用可视化组件提供的时间轴
@@ -161,7 +209,7 @@ class TrimProcessor(DataProcessorBase):
             end_sample = end_indices[-1] + 1
             
         elif channel == "Time" and has_time_channel:
-            # 处理Time通道
+            # 处理Time通道 - 保持原始时间轴值
             start_indices = np.where(data >= start_time)[0]
             end_indices = np.where(data <= end_time)[0]
             
@@ -170,23 +218,39 @@ class TrimProcessor(DataProcessorBase):
             
             start_sample = start_indices[0]
             end_sample = end_indices[-1] + 1
+            
+            # 直接返回裁切后的原始时间轴数据（不重置为从0开始）
+            trimmed_data = data[start_sample:end_sample]
+            print(f"POSITIVE_TRIM: Channel {channel} kept samples {start_sample} to {end_sample-1}, time range: {trimmed_data[0]:.3f}s - {trimmed_data[-1]:.3f}s")
+            return trimmed_data
         
         else:
             # 使用采样率计算索引
             start_sample = int(start_time * sampling_rate)
             end_sample = int(end_time * sampling_rate)
+            
+            # 如果没有Time通道但有current_time_axis，需要保持时间对应关系
+            if current_time_axis is not None and not has_time_channel:
+                # 使用时间轴计算的索引来裁切数据
+                time_axis = current_time_axis
+                start_indices = np.where(time_axis >= start_time)[0]
+                end_indices = np.where(time_axis <= end_time)[0]
+                
+                if len(start_indices) > 0 and len(end_indices) > 0:
+                    start_sample = start_indices[0]
+                    end_sample = end_indices[-1] + 1
         
         # 确保索引范围有效
         start_sample = max(0, min(start_sample, len(data) - 1))
         end_sample = max(start_sample + 1, min(end_sample, len(data)))
         
         trimmed_data = data[start_sample:end_sample]
-        print(f"TRIM: Channel {channel} trimmed from samples {start_sample} to {end_sample-1}")
+        print(f"POSITIVE_TRIM: Channel {channel} kept samples {start_sample} to {end_sample-1}")
         
         return trimmed_data
     
-    def _trim_array_data(self, data, start_time, end_time, sampling_rate):
-        """裁切NumPy数组数据"""
+    def _positive_trim_array_data(self, data, start_time, end_time, sampling_rate):
+        """正剪切NumPy数组数据"""
         start_sample = int(start_time * sampling_rate)
         end_sample = int(end_time * sampling_rate)
         
@@ -194,6 +258,134 @@ class TrimProcessor(DataProcessorBase):
         end_sample = max(start_sample + 1, min(end_sample, data.shape[0]))
         
         return data[start_sample:end_sample]
+    
+    def _negative_trim_channel_data(self, channel, data, start_time, end_time, sampling_rate,
+                                  current_time_axis, has_time_channel, all_data, strategy):
+        """负剪切：删除指定区间内的数据，保留区间外数据"""
+        print(f"NEGATIVE_TRIM: Processing channel={channel}, data_length={len(data)}, strategy={strategy}")
+        
+        # 计算区间的索引
+        if current_time_axis is not None and len(current_time_axis) == len(data):
+            time_axis = current_time_axis
+            start_indices = np.where(time_axis >= start_time)[0]
+            end_indices = np.where(time_axis <= end_time)[0]
+            
+            if len(start_indices) == 0 or len(end_indices) == 0:
+                print(f"NEGATIVE_TRIM: Time range outside data range, returning original data")
+                return data.copy()
+            
+            start_sample = start_indices[0]
+            end_sample = end_indices[-1] + 1
+            
+        elif channel == "Time" and has_time_channel:
+            start_indices = np.where(data >= start_time)[0]
+            end_indices = np.where(data <= end_time)[0]
+            
+            if len(start_indices) == 0 or len(end_indices) == 0:
+                print(f"NEGATIVE_TRIM: Time range outside data range, returning original data")
+                return data.copy()
+            
+            start_sample = start_indices[0]
+            end_sample = end_indices[-1] + 1
+        else:
+            start_sample = int(start_time * sampling_rate)
+            end_sample = int(end_time * sampling_rate)
+        
+        # 确保索引范围有效
+        start_sample = max(0, min(start_sample, len(data) - 1))
+        end_sample = max(start_sample + 1, min(end_sample, len(data)))
+        
+        if strategy == "delete_shift":
+            # 策略一：删除区间数据 + 后续数据平移
+            before_data = data[:start_sample]
+            after_data = data[end_sample:]
+            processed_data = np.concatenate([before_data, after_data])
+            print(f"NEGATIVE_TRIM: Channel {channel} deleted samples {start_sample}-{end_sample-1}, new length={len(processed_data)}")
+            
+        else:  # smart_fill
+            # 策略二：智能数据填补
+            processed_data = self._smart_fill_data(data, start_sample, end_sample, channel)
+        
+        return processed_data
+    
+    def _negative_trim_array_data(self, data, start_time, end_time, sampling_rate, current_time_axis, strategy):
+        """负剪切NumPy数组数据"""
+        start_sample = int(start_time * sampling_rate)
+        end_sample = int(end_time * sampling_rate)
+        
+        start_sample = max(0, min(start_sample, data.shape[0] - 1))
+        end_sample = max(start_sample + 1, min(end_sample, data.shape[0]))
+        
+        if strategy == "delete_shift":
+            if data.ndim == 1:
+                before_data = data[:start_sample]
+                after_data = data[end_sample:]
+                return np.concatenate([before_data, after_data])
+            else:
+                # 多通道数据
+                before_data = data[:start_sample, :]
+                after_data = data[end_sample:, :]
+                return np.concatenate([before_data, after_data], axis=0)
+        else:  # smart_fill
+            if data.ndim == 1:
+                return self._smart_fill_data(data, start_sample, end_sample, "array_data")
+            else:
+                processed_data = data.copy()
+                for i in range(data.shape[1]):
+                    processed_data[:, i] = self._smart_fill_data(data[:, i], start_sample, end_sample, f"channel_{i}")
+                return processed_data
+    
+    def _smart_fill_data(self, data, start_sample, end_sample, channel_name):
+        """智能数据填补：基于前后10个数据点的统计特征生成新数据"""
+        print(f"SMART_FILL: Filling interval [{start_sample}, {end_sample}) for {channel_name}")
+        
+        # 获取前10个和后10个数据点
+        before_start = max(0, start_sample - 10)
+        before_data = data[before_start:start_sample]
+        
+        after_end = min(len(data), end_sample + 10)
+        after_data = data[end_sample:after_end]
+        
+        # 计算统计特征
+        if len(before_data) > 0 and len(after_data) > 0:
+            # 基准值：前后数据的均值
+            before_mean = np.mean(before_data)
+            after_mean = np.mean(after_data)
+            fill_mean = (before_mean + after_mean) / 2.0
+            
+            # 标准差：前后数据的标准差
+            before_std = np.std(before_data)
+            after_std = np.std(after_data)
+            fill_std = (before_std + after_std) / 2.0
+            
+        elif len(before_data) > 0:
+            # 只有前面数据
+            fill_mean = np.mean(before_data)
+            fill_std = np.std(before_data)
+        elif len(after_data) > 0:
+            # 只有后面数据
+            fill_mean = np.mean(after_data)
+            fill_std = np.std(after_data)
+        else:
+            # 没有参考数据，使用默认值
+            fill_mean = 0.0
+            fill_std = 1.0
+        
+        # 防止标准差为0
+        if fill_std == 0:
+            fill_std = 0.01
+        
+        # 生成新数据
+        fill_length = end_sample - start_sample
+        fill_data = np.random.normal(fill_mean, fill_std, fill_length)
+        
+        print(f"SMART_FILL: Generated {fill_length} points with mean={fill_mean:.6f}, std={fill_std:.6f}")
+        
+        # 填补数据
+        processed_data = data.copy()
+        processed_data[start_sample:end_sample] = fill_data
+        
+        return processed_data
 
 
 class FilterProcessor(DataProcessorBase):
@@ -1052,12 +1244,36 @@ class FileDataProcessor:
     
     def _build_success_message(self, operation, params, processed_data):
         """构建成功处理的消息"""
-        if operation == "裁切" and isinstance(processed_data, dict) and "Time" in processed_data:
-            time_data = processed_data["Time"]
-            if len(time_data) > 0:
-                actual_start = np.min(time_data)
-                actual_end = np.max(time_data)
-                return f"裁切成功: 时间范围 {actual_start:.3f}s - {actual_end:.3f}s (数据点: {len(time_data)})"
+        if operation == "裁切":
+            trim_mode = params.get("trim_mode", "positive")
+            
+            # 计算处理后数据长度
+            if isinstance(processed_data, dict):
+                data_lengths = [len(data) for data in processed_data.values() if isinstance(data, np.ndarray)]
+                if data_lengths:
+                    avg_length = int(np.mean(data_lengths))
+                    
+                    if trim_mode == "positive":
+                        if "Time" in processed_data:
+                            time_data = processed_data["Time"]
+                            if len(time_data) > 0:
+                                actual_start = np.min(time_data)
+                                actual_end = np.max(time_data)
+                                return f"正剪切成功: 保留时间范围 {actual_start:.3f}s - {actual_end:.3f}s (数据点: {len(time_data)})"
+                        else:
+                            start_time = params.get("start_time", 0)
+                            end_time = params.get("end_time", 10)
+                            return f"正剪切成功: 保留时间范围 {start_time:.3f}s - {end_time:.3f}s (数据点: {avg_length})"
+                    else:  # negative
+                        strategy = params.get("negative_strategy", "smart_fill")
+                        strategy_name = "智能填补" if strategy == "smart_fill" else "删除平移"
+                        start_time = params.get("start_time", 0)
+                        end_time = params.get("end_time", 10)
+                        return f"负剪切成功 ({strategy_name}): 处理时间范围 {start_time:.3f}s - {end_time:.3f}s (数据点: {avg_length})"
+            
+            elif isinstance(processed_data, np.ndarray):
+                trim_mode_name = "正剪切" if trim_mode == "positive" else "负剪切"
+                return f"{trim_mode_name}成功: 数据点 {len(processed_data)}"
         
         return "Processing successful"
     

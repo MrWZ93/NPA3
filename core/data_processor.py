@@ -160,11 +160,6 @@ class TrimProcessor(DataProcessorBase):
             start_sample = start_indices[0]
             end_sample = end_indices[-1] + 1
             
-            # 如果是第一个处理的通道，创建裁切时间轴
-            if channel == "Time" or (not has_time_channel and channel == list(all_data.keys())[0]):
-                trimmed_time_axis = time_axis[start_sample:end_sample]
-                return trimmed_time_axis
-            
         elif channel == "Time" and has_time_channel:
             # 处理Time通道
             start_indices = np.where(data >= start_time)[0]
@@ -180,11 +175,6 @@ class TrimProcessor(DataProcessorBase):
             # 使用采样率计算索引
             start_sample = int(start_time * sampling_rate)
             end_sample = int(end_time * sampling_rate)
-            
-            # 如果没有Time通道，创建时间轴
-            if not has_time_channel and channel == list(all_data.keys())[0]:
-                trimmed_time_axis = np.arange(start_sample, end_sample) / sampling_rate
-                # 这里需要在调用方处理时间轴的添加
         
         # 确保索引范围有效
         start_sample = max(0, min(start_sample, len(data) - 1))
@@ -1017,13 +1007,7 @@ class FileDataProcessor:
             # 根据操作类型调用相应的处理器
             if operation == "裁切":
                 processed_data = self.trim_processor.process(self.current_data, params, current_time_axis)
-                # 特殊处理：为裁切操作添加时间轴（如果需要）
-                if isinstance(processed_data, dict) and "Time" not in processed_data and not any("Time" in str(k) for k in processed_data.keys()):
-                    # 如果没有时间轴，创建一个
-                    data_lengths = [len(data) for data in processed_data.values() if isinstance(data, np.ndarray)]
-                    if data_lengths:
-                        min_length = min(data_lengths)
-                        processed_data["Time"] = np.arange(min_length) / params["sampling_rate"]
+                # 移除自动添加时间轴的逻辑，保持原有通道结构
             
             elif operation == "低通滤波":
                 processed_data = self.filter_processor.process_lowpass(self.current_data, params, current_time_axis)

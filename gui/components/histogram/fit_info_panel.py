@@ -183,7 +183,7 @@ class FitInfoPanel(QWidget):
         # μσ复制按钮
         self.copy_mu_sigma_btn = QToolButton()
         self.copy_mu_sigma_btn.setText("μσ")
-        self.copy_mu_sigma_btn.setToolTip("Copy μ and σ values to clipboard for Excel")
+        self.copy_mu_sigma_btn.setToolTip("Copy μ, σ and FWHM values to clipboard for Excel")
         self.copy_mu_sigma_btn.setMaximumHeight(20)  # 限制按钮高度
         self.copy_mu_sigma_btn.setStyleSheet("QToolButton { font-size: 9px; padding: 2px; }")
         
@@ -528,11 +528,11 @@ class FitInfoPanel(QWidget):
         self.toggle_fit_labels.emit(not checked)  # 传递相反的值，因为checked=True表示按钮被按下，即隐藏标签
     
     def copy_mu_sigma_values(self):
-        """复制所有拟合结果的μ和σ值到剪贴板，适合Excel格式"""
+        """复制所有拟合结果的μ、σ和FWHM值到剪贴板，适合Excel格式"""
         if self.fit_list.count() == 0:
             return
         
-        # 收集所有拟合的μ和σ值，每行一个拟合结果
+        # 收集所有拟合的μ、σ和FWHM值，每行一个拟合结果
         rows = []
         
         for i in range(self.fit_list.count()):
@@ -540,15 +540,15 @@ class FitInfoPanel(QWidget):
             if item:
                 data = item.data(Qt.ItemDataRole.UserRole)
                 if data:
-                    # 每行格式：μ值 \t σ值
-                    row = f"{data['mu']:.4f}\t{data['sigma']:.4f}"
+                    # 每行格式：μ值 \t σ值 \t FWHM值
+                    row = f"{data['mu']:.4f}\t{data['sigma']:.4f}\t{data['fwhm']:.4f}"
                     rows.append(row)
         
-        # 创建适合Excel的格式（每行包含一个拟合的μ和σ值）
+        # 创建适合Excel的格式（每行包含一个拟合的μ、σ和FWHM值）
         clipboard_text = "\n".join(rows)
         
         # 复制到剪贴板
         clipboard = QApplication.clipboard()
         clipboard.setText(clipboard_text)
         
-        print(f"Copied μ and σ values to clipboard: {len(rows)} fits")
+        print(f"Copied μ, σ and FWHM values to clipboard: {len(rows)} fits")

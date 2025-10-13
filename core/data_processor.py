@@ -299,7 +299,21 @@ class TrimProcessor(DataProcessorBase):
             # 策略一：删除区间数据 + 后续数据平移
             before_data = data[:start_sample]
             after_data = data[end_sample:]
-            processed_data = np.concatenate([before_data, after_data])
+            
+            # 特殊处理 Time 通道:需要平移时间轴使其连续
+            if channel == "Time" or (current_time_axis is not None and len(current_time_axis) == len(data)):
+                # 计算被删除的时间长度
+                if len(before_data) > 0 and len(after_data) > 0:
+                    time_gap = after_data[0] - before_data[-1]  # 删除区间造成的时间间隔
+                    # 将后半部分的时间平移,使时间轴连续
+                    processed_data = np.concatenate([before_data, after_data - time_gap])
+                    print(f"NEGATIVE_TRIM: Channel {channel} time shifted by {time_gap:.6f}s to make continuous")
+                    print(f"NEGATIVE_TRIM: Time range after shift: {processed_data[0]:.3f}s - {processed_data[-1]:.3f}s")
+                else:
+                    processed_data = np.concatenate([before_data, after_data])
+            else:
+                processed_data = np.concatenate([before_data, after_data])
+            
             print(f"NEGATIVE_TRIM: Channel {channel} deleted samples {start_sample}-{end_sample-1}, new length={len(processed_data)}")
             
         else:  # smart_fill
@@ -320,12 +334,34 @@ class TrimProcessor(DataProcessorBase):
             if data.ndim == 1:
                 before_data = data[:start_sample]
                 after_data = data[end_sample:]
-                return np.concatenate([before_data, after_data])
+                result = np.concatenate([before_data, after_data])
+                
+                # 如果有时间轴,也需要处理时间平移
+                if current_time_axis is not None:
+                    time_before = current_time_axis[:start_sample]
+                    time_after = current_time_axis[end_sample:]
+                    if len(time_before) > 0 and len(time_after) > 0:
+                        time_gap = time_after[0] - time_before[-1]
+                        shifted_time = np.concatenate([time_before, time_after - time_gap])
+                        # 返回字典格式,包含时间轴
+                        return {"Time": shifted_time, "Data": result}
+                return result
             else:
                 # 多通道数据
                 before_data = data[:start_sample, :]
                 after_data = data[end_sample:, :]
-                return np.concatenate([before_data, after_data], axis=0)
+                result = np.concatenate([before_data, after_data], axis=0)
+                
+                # 如果有时间轴,也需要处理时间平移
+                if current_time_axis is not None:
+                    time_before = current_time_axis[:start_sample]
+                    time_after = current_time_axis[end_sample:]
+                    if len(time_before) > 0 and len(time_after) > 0:
+                        time_gap = time_after[0] - time_before[-1]
+                        shifted_time = np.concatenate([time_before, time_after - time_gap])
+                        # 返回字典格式,包含时间轴
+                        return {"Time": shifted_time, "Data": result}
+                return result
         else:  # smart_fill
             if data.ndim == 1:
                 return self._smart_fill_data(data, start_sample, end_sample, "array_data")

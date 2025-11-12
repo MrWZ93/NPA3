@@ -389,6 +389,9 @@ class ProcessingTab(QWidget):
         super(ProcessingTab, self).__init__(parent)
         self.layout = QVBoxLayout(self)
         
+        # 存储可视化组件的引用
+        self.visualizer = None
+        
         # 处理操作选择 - 使用更现代的标题
         operation_header = StyleHelper.header_label("Processing Operations")
         self.operation_group = QGroupBox()
@@ -535,6 +538,35 @@ class ProcessingTab(QWidget):
             time_range_label = QLabel("Select time range based on x-axis values (0-based)")
             time_range_label.setStyleSheet("color: #0078d7; font-style: italic;")
             self.params_layout.addRow("", time_range_label)
+            
+            # 添加 "使用当前窗口" 按钮
+            use_window_button = QPushButton("Use Current Window Range")
+            use_window_button.setIcon(QIcon.fromTheme("zoom-fit-best"))
+            use_window_button.setIconSize(QSize(16, 16))
+            use_window_button.setMinimumHeight(32)
+            use_window_button.setToolTip("Set start/end time to match the current visible window in the plot")
+            use_window_button.clicked.connect(self.use_current_window_range)
+            use_window_button.setStyleSheet("""
+                QPushButton {
+                    background-color: #0078d7;
+                    color: white;
+                    border: none;
+                    border-radius: 4px;
+                    padding: 6px 12px;
+                    font-weight: bold;
+                }
+                QPushButton:hover {
+                    background-color: #005a9e;
+                }
+                QPushButton:pressed {
+                    background-color: #004578;
+                }
+            """)
+            self.params_layout.addRow("", use_window_button)
+            # 不将按钮添加到 param_widgets，因为它不是参数控件
+            # self.param_widgets["use_window_button"] = use_window_button
+            # 保存为单独的成员变量以便后续访问
+            self.use_window_button = use_window_button
             
             # 剪切模式选择
             trim_mode_combo = QComboBox()
@@ -800,4 +832,49 @@ class ProcessingTab(QWidget):
             params["channel"] = selected_channel
         
         return params
+    
+    def set_visualizer(self, visualizer):
+        """设置可视化组件的引用"""
+        self.visualizer = visualizer
+    
+    def use_current_window_range(self):
+        """使用当前可视化窗口的时间范围设置 trim 参数"""
+        if self.visualizer is None:
+            QMessageBox.warning(self, "Error", "Visualizer not available")
+            return
+        
+        # 检查当前操作是否是 Trim
+        if self.current_operation != "裁切":
+            QMessageBox.warning(
+                self, 
+                "Error", 
+                "This function is only available for Trim operation.\nPlease select 'Trim' first."
+            )
+            return
+        
+        # 获取当前可见的 X 轴范围
+        x_min, x_max = self.visualizer.get_visible_xlim()
+        
+        if x_min is None or x_max is None:
+            QMessageBox.warning(self, "Error", "No visible plot range available.\nPlease load and display data first.")
+            return
+        
+        # 验证时间范围的有效性
+        if x_min >= x_max:
+            QMessageBox.warning(self, "Error", f"Invalid time range: start ({x_min:.3f}s) >= end ({x_max:.3f}s)")
+            return
+        
+        # 设置开始/结束时间输入框
+        if "start_time" in self.param_widgets and "end_time" in self.param_widgets:
+            self.param_widgets["start_time"].setValue(x_min)
+            self.param_widgets["end_time"].setValue(x_max)
+            
+            # 显示成功消息
+            QMessageBox.information(
+                self, 
+                "Success", 
+                f"Time range set to current window:\nStart: {x_min:.3f}s\nEnd: {x_max:.3f}s"
+            )
+        else:
+            QMessageBox.warning(self, "Error", "Trim parameters not available")
 

@@ -436,6 +436,21 @@ class DataVisualizer(FigureCanvas):
         """获取当前显示的时间轴，供trim操作使用"""
         return self.current_time_axis
     
+    def get_visible_xlim(self):
+        """获取当前显示的 X 轴范围（时间范围）
+        
+        Returns:
+            tuple: (start_time, end_time) 当前可见的时间范围
+                   如果没有图表或轴，返回 (None, None)
+        """
+        if not self.axes or len(self.axes) == 0:
+            return (None, None)
+        
+        # 获取第一个子图的 X 轴范围
+        # 因为在同步模式下所有子图的 X 轴范围是一致的
+        x_min, x_max = self.axes[0].get_xlim()
+        return (x_min, x_max)
+    
     def clear(self):
         """清除图表"""
         self.fig.clear()

@@ -585,6 +585,9 @@ class FileExplorerApp(QMainWindow):
         self.processing_tab.process_button.clicked.connect(self.process_data)
         self.processing_tab.save_button.clicked.connect(self.save_processed_data)
         
+        # 设置处理标签页的可视化组件引用
+        self.processing_tab.set_visualizer(self.visualizer)
+        
         # 处理后文件单击和双击打开
         self.processed_files_widget.files_list.itemClicked.connect(self.on_processed_file_selected)
         self.processed_files_widget.files_list.itemDoubleClicked.connect(self.on_processed_file_selected)

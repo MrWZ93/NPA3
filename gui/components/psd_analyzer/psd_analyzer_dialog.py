@@ -212,16 +212,18 @@ class PSDAnalyzerDialog(QDialog):
         self.psd_layout = QVBoxLayout()
         self.psd_group.setLayout(self.psd_layout)
         
-        # PSD参数设置 - 使用更紧凑的布局
+        # PSD参数设置 - 使用水平布局以节省空间
         params_container = QWidget()
         params_layout = QHBoxLayout(params_container)
-        params_layout.setContentsMargins(0, 0, 0, 0)
+        params_layout.setContentsMargins(5, 5, 5, 5)
+        params_layout.setSpacing(10)
         
-        # 左侧参数
-        left_params = QWidget()
-        left_layout = QFormLayout(left_params)
-        left_layout.setContentsMargins(0, 0, 10, 0)
-        left_layout.setVerticalSpacing(5)
+        # 计算参数区域
+        compute_params_group = QGroupBox("Computation Parameters")
+        compute_params_layout = QFormLayout(compute_params_group)
+        compute_params_layout.setContentsMargins(10, 10, 10, 10)
+        compute_params_layout.setVerticalSpacing(8)
+        compute_params_layout.setHorizontalSpacing(10)
 
         # 参数控件...
         # [这里保留原来的参数控件代码]
@@ -268,131 +270,73 @@ class PSDAnalyzerDialog(QDialog):
         self.psd_display_combo = QComboBox()
         self.psd_display_combo.addItems(["dB Scale", "Raw Power"])
         
-        left_layout.addRow("Window:", self.psd_window_combo)
-        left_layout.addRow("FFT Length:", self.psd_nfft_combo)
-        left_layout.addRow("Segment Length:", self.psd_nperseg_combo)
-        left_layout.addRow("Overlap:", self.psd_noverlap_combo)
-        left_layout.addRow("Detrend:", self.psd_detrend_combo)
-        left_layout.addRow("Scaling:", self.psd_scaling_combo)
-        left_layout.addRow("Display:", self.psd_display_combo)
+        # 将计算参数添加到布局
+        compute_params_layout.addRow("Window:", self.psd_window_combo)
+        compute_params_layout.addRow("FFT Length:", self.psd_nfft_combo)
+        compute_params_layout.addRow("Segment Length:", self.psd_nperseg_combo)
+        compute_params_layout.addRow("Overlap:", self.psd_noverlap_combo)
+        compute_params_layout.addRow("Detrend:", self.psd_detrend_combo)
+        compute_params_layout.addRow("Scaling:", self.psd_scaling_combo)
+        compute_params_layout.addRow("Display:", self.psd_display_combo)
         
-        # 右侧参数
-        right_params = QWidget()
-        right_layout = QFormLayout(right_params)
-        right_layout.setContentsMargins(10, 0, 0, 0)
-        right_layout.setVerticalSpacing(5)
+        # 显示选项区域
+        display_options_group = QGroupBox("Display Options")
+        display_options_layout = QVBoxLayout(display_options_group)
+        display_options_layout.setContentsMargins(10, 10, 10, 10)
+        display_options_layout.setSpacing(8)
         
-        # 添加截止频率设置
-        freq_cutoff = QWidget()
-        cutoff_layout = QHBoxLayout(freq_cutoff)
-        cutoff_layout.setContentsMargins(0, 0, 0, 0)
-        cutoff_layout.setSpacing(5)
+        # 频率截止设置
+        freq_cutoff_widget = QWidget()
+        freq_cutoff_layout = QFormLayout(freq_cutoff_widget)
+        freq_cutoff_layout.setContentsMargins(0, 0, 0, 0)
+        freq_cutoff_layout.setHorizontalSpacing(10)
+        freq_cutoff_layout.setVerticalSpacing(5)
         
         self.cutoff_freq_low = QDoubleSpinBox()
         self.cutoff_freq_low.setRange(0, 100000)
-        self.cutoff_freq_low.setValue(0)  # 默认不设置低频截止
+        self.cutoff_freq_low.setValue(0)
         self.cutoff_freq_low.setSingleStep(10)
+        self.cutoff_freq_low.setSuffix(" Hz")
         
         self.cutoff_freq_high = QDoubleSpinBox()
         self.cutoff_freq_high.setRange(0, 100000)
-        self.cutoff_freq_high.setValue(0)  # 默认不设置高频截止
+        self.cutoff_freq_high.setValue(0)
         self.cutoff_freq_high.setSingleStep(100)
+        self.cutoff_freq_high.setSuffix(" Hz")
         
-        cutoff_layout.addWidget(QLabel("Low(Hz):"))
-        cutoff_layout.addWidget(self.cutoff_freq_low)
-        cutoff_layout.addWidget(QLabel("High(Hz):"))
-        cutoff_layout.addWidget(self.cutoff_freq_high)
+        freq_cutoff_layout.addRow("Low Cutoff:", self.cutoff_freq_low)
+        freq_cutoff_layout.addRow("High Cutoff:", self.cutoff_freq_high)
         
-        # 添加峰值检测设置
-        self.peak_detection = QGroupBox("Peak Detection")
-        self.peak_detection.setCheckable(True)
-        self.peak_detection.setChecked(False)
-        peak_layout = QVBoxLayout(self.peak_detection)
-        
-        # 添加峰值高度设置
-        height_widget = QWidget()
-        height_layout = QHBoxLayout(height_widget)
-        height_layout.setContentsMargins(0, 0, 0, 0)
-        
-        self.peak_height_label = QLabel("Height(%)")
-        self.peak_height_slider = QSlider(Qt.Orientation.Horizontal)
-        self.peak_height_slider.setRange(1, 99)
-        self.peak_height_slider.setValue(20)  # 默认值
-        self.peak_height_value = QLabel("20%")
-        
-        height_layout.addWidget(self.peak_height_label)
-        height_layout.addWidget(self.peak_height_slider, 1)
-        height_layout.addWidget(self.peak_height_value)
-        
-        # 添加峰值间距设置
-        distance_widget = QWidget()
-        distance_layout = QHBoxLayout(distance_widget)
-        distance_layout.setContentsMargins(0, 0, 0, 0)
-        
-        self.peak_distance_label = QLabel("Min Dist(Hz):")
-        self.peak_distance_spin = QDoubleSpinBox()
-        self.peak_distance_spin.setRange(0, 1000)
-        self.peak_distance_spin.setValue(5)  # 默认值
-        self.peak_distance_spin.setSingleStep(1)
-        
-        distance_layout.addWidget(self.peak_distance_label)
-        distance_layout.addWidget(self.peak_distance_spin)
-        
-        # 添加峰值阈值设置
-        threshold_widget = QWidget()
-        threshold_layout = QHBoxLayout(threshold_widget)
-        threshold_layout.setContentsMargins(0, 0, 0, 0)
-        
-        self.peak_threshold_label = QLabel("Prominence(%):")
-        self.peak_threshold_spin = QSpinBox()
-        self.peak_threshold_spin.setRange(0, 100)
-        self.peak_threshold_spin.setValue(5)  # 默认值5%
-        
-        threshold_layout.addWidget(self.peak_threshold_label)
-        threshold_layout.addWidget(self.peak_threshold_spin)
-        
-        # 将峰值检测控件添加到峰值检测布局
-        peak_layout.addWidget(height_widget)
-        peak_layout.addWidget(distance_widget)
-        peak_layout.addWidget(threshold_widget)
-        
-        # 添加复选框设置
-        option_widget = QWidget()
-        option_layout = QHBoxLayout(option_widget)
-        option_layout.setContentsMargins(0, 0, 0, 0)
+        # 显示选项复选框
+        options_widget = QWidget()
+        options_layout = QVBoxLayout(options_widget)
+        options_layout.setContentsMargins(0, 0, 0, 0)
+        options_layout.setSpacing(5)
         
         self.psd_normalize_check = QCheckBox("Normalize")
         self.psd_normalize_check.setChecked(True)
         
-        self.psd_log_x_check = QCheckBox("Log X")
+        self.psd_log_x_check = QCheckBox("Log X-axis")
         self.psd_log_x_check.setChecked(True)
         
-        self.psd_log_y_check = QCheckBox("Log Y")
+        self.psd_log_y_check = QCheckBox("Log Y-axis")
         self.psd_log_y_check.setChecked(True)
         
         self.psd_exclude_dc_check = QCheckBox("Exclude DC")
         self.psd_exclude_dc_check.setChecked(True)
         
-        option_layout.addWidget(self.psd_normalize_check)
-        option_layout.addWidget(self.psd_log_x_check)
-        option_layout.addWidget(self.psd_log_y_check)
-        option_layout.addWidget(self.psd_exclude_dc_check)
-        
-        # 添加频带分析选择器切换
-        band_selector_widget = QWidget()
-        band_selector_layout = QHBoxLayout(band_selector_widget)
-        band_selector_layout.setContentsMargins(0, 0, 0, 0)
-        
-        self.band_selector_check = QCheckBox("Enable Band Selector")
+        self.band_selector_check = QCheckBox("Band Selector")
         self.band_selector_check.setChecked(False)
         
-        band_selector_layout.addWidget(self.band_selector_check)
+        options_layout.addWidget(self.psd_normalize_check)
+        options_layout.addWidget(self.psd_log_x_check)
+        options_layout.addWidget(self.psd_log_y_check)
+        options_layout.addWidget(self.psd_exclude_dc_check)
+        options_layout.addWidget(self.band_selector_check)
         
-        # 添加到右侧布局
-        right_layout.addRow("Cutoffs:", freq_cutoff)
-        right_layout.addRow("", self.peak_detection)
-        right_layout.addRow("Options:", option_widget)
-        right_layout.addRow("", band_selector_widget)
+        # 添加到显示选项组
+        display_options_layout.addWidget(freq_cutoff_widget)
+        display_options_layout.addWidget(options_widget)
         
         # 按钮布局
         button_widget = QWidget()
@@ -419,9 +363,9 @@ class PSDAnalyzerDialog(QDialog):
         button_layout.addWidget(self.load_preset_button)
         button_layout.addStretch(1)
         
-        # 将左右两侧参数添加到参数容器
-        params_layout.addWidget(left_params)
-        params_layout.addWidget(right_params)
+        # 将参数组添加到主布局
+        params_layout.addWidget(compute_params_group)
+        params_layout.addWidget(display_options_group)
         
         # 添加到PSD布局
         self.psd_layout.addWidget(params_container)
@@ -619,17 +563,8 @@ class PSDAnalyzerDialog(QDialog):
         self.save_preset_button.clicked.connect(self.save_preset)
         self.load_preset_button.clicked.connect(self.load_preset)
         
-        # 峰值高度滑块的值变化
-        self.peak_height_slider.valueChanged.connect(self.update_peak_height_label)
-        
-        # 峰值检测复选框
-        self.peak_detection.toggled.connect(self.toggle_peak_detection_options)
-        
         # 频带选择器
         self.band_selector_check.stateChanged.connect(self.toggle_band_selector)
-        
-        # 初始禁用峰值检测选项
-        self.toggle_peak_detection_options(False)
         
         # 比较相关功能
         self.add_to_compare_button.clicked.connect(self.add_to_compare)
@@ -667,17 +602,6 @@ class PSDAnalyzerDialog(QDialog):
         for canvas in [self.visualizer, self.psd_visualizer]:
             canvas.figure.patch.set_facecolor('#f8f8f8')
             canvas.figure.set_dpi(100)
-    
-    def update_peak_height_label(self, value):
-        """更新峰值高度标签"""
-        self.peak_height_value.setText(f"{value}%")
-        
-    def toggle_peak_detection_options(self, enabled):
-        """切换峰值检测选项的启用状态"""
-        for widget in [self.peak_height_slider, self.peak_height_label, self.peak_height_value,
-                      self.peak_distance_spin, self.peak_distance_label,
-                      self.peak_threshold_spin, self.peak_threshold_label]:
-            widget.setEnabled(enabled)
     
     def toggle_band_selector(self, state):
         """切换频带选择器"""
@@ -973,12 +897,6 @@ class PSDAnalyzerDialog(QDialog):
         low_cutoff = self.cutoff_freq_low.value()
         high_cutoff = self.cutoff_freq_high.value()
         
-        # 获取峰值检测设置
-        find_peaks_enabled = self.peak_detection.isChecked()
-        peak_height = self.peak_height_slider.value()
-        peak_distance = self.peak_distance_spin.value()
-        peak_threshold = self.peak_threshold_spin.value()
-        
         # 检查数据长度
         data_length = len(channel_data)
         if data_length < nperseg:
@@ -1027,8 +945,7 @@ class PSDAnalyzerDialog(QDialog):
         self.psd_worker.progress.connect(progress.setValue)
         self.psd_worker.finished.connect(lambda result: self.on_psd_computed(
             result, channel_name, window, nfft, normalize, log_x, log_y, exclude_dc, 
-            is_db_scale, low_cutoff, high_cutoff, find_peaks_enabled, 
-            peak_height, peak_distance, peak_threshold
+            is_db_scale, low_cutoff, high_cutoff
         ))
         self.psd_worker.error.connect(self.on_psd_error)
         
@@ -1039,8 +956,7 @@ class PSDAnalyzerDialog(QDialog):
         self.psd_worker.start()
     
     def on_psd_computed(self, result, channel_name, window_type, nfft, normalize, log_x, log_y, 
-                        exclude_dc, is_db_scale, low_cutoff, high_cutoff, find_peaks_enabled, 
-                        peak_height, peak_distance, peak_threshold):
+                        exclude_dc, is_db_scale, low_cutoff, high_cutoff):
         """PSD计算完成回调"""
         # 重新启用计算按钮
         self.compute_psd_button.setEnabled(True)
@@ -1064,10 +980,6 @@ class PSDAnalyzerDialog(QDialog):
             log_y=log_y,
             exclude_bins=1 if exclude_dc else 0,
             plot_type=plot_type,
-            find_peaks_enabled=find_peaks_enabled,
-            peak_height=peak_height,
-            peak_distance=peak_distance,
-            peak_threshold=peak_threshold,
             window_type=window_type,
             nfft=nfft,
             sampling_rate=self.file_loader.sampling_rate,
@@ -1190,10 +1102,6 @@ class PSDAnalyzerDialog(QDialog):
             "log_x": self.psd_log_x_check.isChecked(),
             "log_y": self.psd_log_y_check.isChecked(),
             "exclude_dc": self.psd_exclude_dc_check.isChecked(),
-            "peak_detection": self.peak_detection.isChecked(),
-            "peak_height": self.peak_height_slider.value(),
-            "peak_distance": self.peak_distance_spin.value(),
-            "peak_threshold": self.peak_threshold_spin.value(),
             "band_selector": self.band_selector_check.isChecked()
         }
         
@@ -1281,19 +1189,6 @@ class PSDAnalyzerDialog(QDialog):
                 
             if "exclude_dc" in preset:
                 self.psd_exclude_dc_check.setChecked(preset["exclude_dc"])
-                
-            # 设置峰值检测
-            if "peak_detection" in preset:
-                self.peak_detection.setChecked(preset["peak_detection"])
-                        
-            if "peak_height" in preset:
-                self.peak_height_slider.setValue(preset["peak_height"])
-                
-            if "peak_distance" in preset:
-                self.peak_distance_spin.setValue(preset["peak_distance"])
-                
-            if "peak_threshold" in preset:
-                self.peak_threshold_spin.setValue(preset["peak_threshold"])
                 
             if "band_selector" in preset:
                 self.band_selector_check.setChecked(preset["band_selector"])

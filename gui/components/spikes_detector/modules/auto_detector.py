@@ -327,7 +327,15 @@ class AutoSpikeDetector(QWidget):
         self.method_combo.addItems(["Threshold", "Scipy Algorithm"])
         method_layout.addWidget(self.method_combo, 1)
         
-        # 1.2 阈值设置
+        # 1.2 振幅模式选择
+        amplitude_mode_layout = QHBoxLayout()
+        amplitude_mode_layout.addWidget(QLabel("Amplitude Mode:"))
+        self.amplitude_mode_combo = QComboBox()
+        self.amplitude_mode_combo.addItems(["Maximum", "Minimum"])
+        self.amplitude_mode_combo.setToolTip("Maximum: detect positive peaks (peaks above baseline)\nMinimum: detect negative peaks (peaks below baseline)")
+        amplitude_mode_layout.addWidget(self.amplitude_mode_combo, 1)
+        
+        # 1.3 阈值设置
         threshold_layout = QVBoxLayout()
         threshold_header = QHBoxLayout()
         threshold_header.addWidget(QLabel("Threshold:"))
@@ -338,8 +346,8 @@ class AutoSpikeDetector(QWidget):
         self.threshold_spin.setSingleStep(0.1)
         threshold_header.addWidget(self.threshold_spin, 1)
         
-        # 1.3 添加提示文字
-        threshold_tip = QLabel("Note: Positive threshold detects positive peaks, negative threshold detects negative peaks")
+        # 1.4 添加提示文字
+        threshold_tip = QLabel("Threshold value will be applied based on selected amplitude mode")
         threshold_tip.setStyleSheet("color: gray; font-size: 9px;")
         threshold_tip.setWordWrap(True)
         
@@ -368,8 +376,9 @@ class AutoSpikeDetector(QWidget):
         self.detect_btn = QPushButton("Detect Peaks")
         self.detect_btn.setStyleSheet("background-color: #4CAF50; color: white; font-weight: bold; padding: 5px;")
         
-        # 1.7 添加到检测设置布局
+        #1.7 添加到检测设置布局
         detection_layout.addLayout(method_layout)
+        detection_layout.addLayout(amplitude_mode_layout)
         detection_layout.addLayout(threshold_layout)
         detection_layout.addLayout(min_distance_layout)
         detection_layout.addLayout(duration_layout)
@@ -543,13 +552,26 @@ class AutoSpikeDetector(QWidget):
         self._thread_lock = True  # 设置线程锁
         
         try:
-            # 获取检测参数
+            # 获取参数
             threshold = self.threshold_spin.value()
             min_distance = self.min_distance_spin.value()
             method = "threshold" if self.method_combo.currentIndex() == 0 else "scipy"
             
-            # 确保任何旧的线程都被清理
+            # 根据振幅模式调整阈值符号
+            amplitude_mode = self.amplitude_mode_combo.currentText()
+            if amplitude_mode == "Minimum":
+                # 检测负峰值，确保阈值为负
+                threshold = -abs(threshold)
+            else:  # Maximum
+                # 检测正峰值，确保阈值为正
+                threshold = abs(threshold)
+            
+            # 清理现有线程
             self.cleanup_detection_thread()
+            
+            # 更新按钮状态
+            self.detect_btn.setEnabled(False)
+            self.detect_btn.setText("Detecting...")
             
             # 创建并启动检测线程
             self.detection_thread = QThread()
@@ -1074,3 +1096,118 @@ class AutoSpikeDetector(QWidget):
             )
             if hasattr(self, 'parent') and hasattr(self.parent(), 'status_bar'):
                 self.parent().status_bar.showMessage(f"Error: {str(e)}")
+    
+    # ========== 数据分段支持方法 ==========
+    
+    def set_time_offset(self, offset):
+        """设置时间偏移（用于分段数据显示全局时间）
+        
+        参数:
+            offset: 时间偏移（秒）
+        """
+        self.time_offset = offset
+    
+    def get_detection_results(self):
+        """获取当前检测结果用于保存
+        
+        返回:
+            字典，包含峰值数据和持续时间数据
+        """
+        if not self.plot_canvas:
+            return None
+        
+        peaks_data = self.plot_canvas.get_peaks_data()
+        if not peaks_data:
+            return None
+        
+        # 将峰值数据转换为列表格式（便于序列化）
+        peaks_list = []
+        for peak_id, peak_info in peaks_data.items():
+            peak_dict = {
+                'id': peak_id,
+                'index': peak_info['index'],
+                'time': peak_info['time'],
+                'amplitude': peak_info['amplitude']
+            }
+            if 'duration' in peak_info:
+                peak_dict['duration'] = peak_info['duration']
+            if 'start_idx' in peak_info:
+                peak_dict['start_idx'] = peak_info['start_idx']
+            if 'end_idx' in peak_info:
+                peak_dict['end_idx'] = peak_info['end_idx']
+            
+            peaks_list.append(peak_dict)
+        
+        return {
+            'peaks': peaks_list,
+            'detection_params': {
+                'threshold': self.threshold_spin.value(),
+                'min_distance': self.min_distance_spin.value(),
+                'duration_threshold': self.duration_threshold_spin.value()
+            }
+        }
+    
+    def load_detection_results(self, results):
+        """加载之前保存的检测结果
+        
+        参数:
+            results: 字典，包含峰值数据和检测参数
+        """
+        if not results or not self.plot_canvas:
+            return
+        
+        try:
+            peaks_list = results.get('peaks', [])
+            if not peaks_list:
+                return
+            
+            # 提取峰值索引并重新检测
+            peaks_indices = [p['index'] for p in peaks_list]
+            
+            # 显示峰值
+            self.plot_canvas.plot_peaks(peaks_indices)
+            
+            # 恢复持续时间信息
+            for peak_info in peaks_list:
+                peak_id = peak_info['id']
+                if 'start_idx' in peak_info and 'end_idx' in peak_info:
+                    self.plot_canvas.set_peak_duration(
+                        peak_id,
+                        peak_info['start_idx'],
+                        peak_info['end_idx']
+                    )
+            
+            # 更新表格
+            self.update_peaks_table()
+            
+            # 恢复检测参数（可选）
+            if 'detection_params' in results:
+                params = results['detection_params']
+                if 'threshold' in params:
+                    self.threshold_spin.setValue(params['threshold'])
+                if 'min_distance' in params:
+                    self.min_distance_spin.setValue(params['min_distance'])
+                if 'duration_threshold' in params:
+                    self.duration_threshold_spin.setValue(params['duration_threshold'])
+            
+        except Exception as e:
+            print(f"Error loading detection results: {e}")
+            import traceback
+            traceback.print_exc()
+    
+    def reset_detection(self):
+        """重置检测状态（清除所有检测结果）"""
+        if self.plot_canvas:
+            # 清除峰值数据
+            self.plot_canvas.peaks_data = {}
+            self.plot_canvas.current_peak_idx = -1
+            
+            # 清除表格
+            self.peaks_table.clearContents()
+            self.peaks_table.setRowCount(0)
+            
+            # 重新绘制画布（如果有数据）
+            if hasattr(self.plot_canvas, 'current_channel_data') and self.plot_canvas.current_channel_data is not None:
+                sampling_rate = getattr(self.plot_canvas, 'sampling_rate', 1000.0)
+                self.plot_canvas.plot_data(self.plot_canvas.current_channel_data, sampling_rate)
+

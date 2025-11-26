@@ -111,40 +111,46 @@ class SpikesDataPlot(FigureCanvas):
             elif hasattr(self, 'amp_cursor_radio') and self.amp_cursor_radio.isChecked():
                 self.dragging_cursor = 'amp'
     
-    def plot_data(self, data, sampling_rate=None):
-        """绘制数据"""
+    def plot_data(self, data, sampling_rate=None, time_offset=0.0):
+        """绘制数据
+        
+        Args:
+            data: 数据
+            sampling_rate: 采样率
+            time_offset: 时间偏移（秒），用于显示全局时间
+        """
         self.data = data
         if sampling_rate is not None:
             self.sampling_rate = sampling_rate
         
-        # 生成时间轴
+        # 生成时间轴（带偏移）
         if self.current_channel_data is not None:
             # 使用当前选中的通道数据
             data_length = len(self.current_channel_data)
-            self.time_axis = np.arange(data_length) / self.sampling_rate
+            self.time_axis = np.arange(data_length) / self.sampling_rate + time_offset
         elif isinstance(data, dict):
             # 如果是字典类型（多通道数据），找到第一个可用通道
             channel_data = next(iter(data.values()))
-            self.time_axis = np.arange(len(channel_data)) / self.sampling_rate
+            self.time_axis = np.arange(len(channel_data)) / self.sampling_rate + time_offset
             # 如果当前通道数据未设置，使用第一个通道
             if self.current_channel_data is None:
                 self.current_channel_data = channel_data
         elif isinstance(data, np.ndarray):
             if data.ndim == 1:
                 # 单通道数据
-                self.time_axis = np.arange(len(data)) / self.sampling_rate
+                self.time_axis = np.arange(len(data)) / self.sampling_rate + time_offset
                 if self.current_channel_data is None:
                     self.current_channel_data = data
             elif data.ndim == 2 and data.shape[1] > 0:
                 # 多通道数据（二维数组）
-                self.time_axis = np.arange(data.shape[0]) / self.sampling_rate
+                self.time_axis = np.arange(data.shape[0]) / self.sampling_rate + time_offset
                 if self.current_channel_data is None:
                     self.current_channel_data = data[:, 0]  # 使用第一列
         else:
             # 其他情况
             if self.current_channel_data is None:
                 if isinstance(data, np.ndarray):
-                    self.time_axis = np.arange(len(data)) / self.sampling_rate
+                    self.time_axis = np.arange(len(data)) / self.sampling_rate + time_offset
                     self.current_channel_data = data
                 else:
                     self.time_axis = None
@@ -157,7 +163,7 @@ class SpikesDataPlot(FigureCanvas):
         
         # 绘制整个trace
         if self.current_channel_data is not None and self.time_axis is not None:
-            self.ax_trace.plot(self.time_axis, self.current_channel_data)
+            self.ax_trace.plot(self.time_axis, self.current_channel_data, linewidth=0.5)
             
             # 设置轴标题和样式
             self.ax_trace.set_title("I-t Trace", fontsize=10, fontweight='bold')

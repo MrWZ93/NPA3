@@ -86,7 +86,7 @@ class ManualSpikeSelector(QWidget):
         amp_layout = QHBoxLayout()
         amp_layout.addWidget(QLabel("Amplitude Mode:"))
         self.amplitude_mode_combo = QComboBox()
-        self.amplitude_mode_combo.addItems(["Maximum", "Average", "Median"])
+        self.amplitude_mode_combo.addItems(["Maximum", "Minimum", "Average", "Median"])
         amp_layout.addWidget(self.amplitude_mode_combo)
         
         # 1.3 基线校正
@@ -240,8 +240,10 @@ class ManualSpikeSelector(QWidget):
         main_splitter.addWidget(control_widget)
         main_splitter.addWidget(self.plot_container)
         
-        # 设置分割器初始比例
-        main_splitter.setSizes([350, 650])
+        # 设置分割器初始比例 (减小左侧控制面板宽度)
+        main_splitter.setSizes([250, 750])
+        main_splitter.setStretchFactor(0, 0)  # 控制面板不伸缩
+        main_splitter.setStretchFactor(1, 1)  # 绘图区域可伸缩
         
         # 添加到主布局
         layout.addWidget(main_splitter)
@@ -362,7 +364,7 @@ class ManualSpikeSelector(QWidget):
                                 fontsize=10, fontweight='bold')
             
             # 绘制整个轨迹
-            self.trace_ax.plot(time_axis, data)
+            self.trace_ax.plot(time_axis, data, linewidth=0.5)
             
             # 绘制已标记的手动峰值
             for spike in self.manual_spikes:
@@ -416,7 +418,7 @@ class ManualSpikeSelector(QWidget):
             self.slider.on_changed(self.on_slider_changed)
             
             # 绘制放大视图 (滑块选择的区域)
-            self.zoomed_ax.plot(time_axis[start_idx:end_idx+1], data[start_idx:end_idx+1])
+            self.zoomed_ax.plot(time_axis[start_idx:end_idx+1], data[start_idx:end_idx+1], linewidth=0.5)
             
             # 在zoomed_ax中标记当前窗口中的峰值
             for spike in self.manual_spikes:
@@ -734,6 +736,11 @@ class ManualSpikeSelector(QWidget):
                 abs_max_idx = np.argmax(np.abs(selection_data))
                 peak_idx = start_idx + abs_max_idx
                 amplitude = selection_data[abs_max_idx] - baseline_value
+            elif amp_mode == "Minimum":
+                # 找到选区内的最小值（负峰值）
+                min_idx = np.argmin(selection_data)
+                peak_idx = start_idx + min_idx
+                amplitude = selection_data[min_idx] - baseline_value
             elif amp_mode == "Average":
                 # 使用平均值
                 amplitude = np.mean(selection_data) - baseline_value
@@ -884,6 +891,16 @@ class ManualSpikeSelector(QWidget):
                     # 使用原始峰值数据
                     peak_idx = self.current_manual_spike_data.get('index')
                     amplitude = self.current_manual_spike_data.get('amplitude')
+            elif amp_mode == "Minimum":
+                # 找到选区内的最小值（负峰值）
+                if len(selection_data) > 0:
+                    min_idx = np.argmin(selection_data)
+                    peak_idx = start_idx + min_idx
+                    amplitude = selection_data[min_idx] - baseline_value
+                else:
+                    # 使用原始峰值数据
+                    peak_idx = self.current_manual_spike_data.get('index')
+                    amplitude = self.current_manual_spike_data.get('amplitude')
             elif amp_mode == "Average":
                 # 使用平均值
                 if len(selection_data) > 0:
@@ -1010,7 +1027,7 @@ class ManualSpikeSelector(QWidget):
                 return
                 
             # 绘制所选区域的数据
-            self.spike_ax.plot(selection_time, selection_data)
+            self.spike_ax.plot(selection_time, selection_data, linewidth=0.5)
             
             # 显示已标记的峰值
             for spike in self.manual_spikes:
@@ -1457,9 +1474,8 @@ class ManualSpikeSelector(QWidget):
             
             # 设置当前选中的峰值数据
             self.current_manual_spike_data = spike_data.copy()
-            
-            # 更新峰值显示
-            self.update_peak_display()
+            # 更新属性
+            self.update_peak_properties()
             
             # 高亮显示该行
             self.spikes_table.selectRow(row)
@@ -1470,7 +1486,69 @@ class ManualSpikeSelector(QWidget):
         except Exception as e:
             import traceback
             print(f"Error navigating to spike: {e}")
-            print(traceback.format_exc())
+            traceback.print_exc()
+    
+    # ========== 数据分段支持方法 ==========
+    
+    def set_time_offset(self, offset):
+        """设置时间偏移（用于分段数据显示全局时间）
+        
+        参数:
+            offset: 时间偏移（秒）
+        """
+        self.time_offset = offset
+    
+    def get_manual_results(self):
+        """获取当前手动标记结果用于保存
+        
+        返回:
+            列表，包含所有手动标记的峰值数据
+        """
+        if not self.manual_spikes:
+            return None
+        
+        # 返回手动峰值列表的深拷贝
+        return [spike.copy() for spike in self.manual_spikes]
+    
+    def load_manual_results(self, results):
+        """加载之前保存的手动标记结果
+        
+        参数:
+            results: 列表，包含手动标记的峰值数据
+        """
+        if not results:
+            return
+        
+        try:
+            # 清除现有手动标记
+            self.manual_spikes = []
+            self.manual_spike_count = 0
+            
+            # 加载保存的峰值数据
+            for spike_data in results:
+                self.manual_spikes.append(spike_data.copy())
+                self.manual_spike_count += 1
+            
+            # 更新表格显示
+            self.update_spikes_table()
+            
+            # 更新峰值计数标签
+            if hasattr(self, 'peak_count_label'):
+                if self.manual_spike_count == 0:
+                    self.peak_count_label.setText("No manual peaks")
+                elif self.manual_spike_count == 1:
+                    self.peak_count_label.setText(f"{self.manual_spike_count} manual peak")
+                else:
+                    self.peak_count_label.setText(f"{self.manual_spike_count} manual peaks")
+            
+            # 更新画布显示（如果有）
+            if hasattr(self, 'plot_canvas') and self.plot_canvas:
+                self.update_manual_plot(preserve_view=True)
+            
+        except Exception as e:
+            print(f"Error loading manual results: {e}")
+            import traceback
+            traceback.print_exc()
     
     def apply_sort(self):
         """应用当前的排序设置"""

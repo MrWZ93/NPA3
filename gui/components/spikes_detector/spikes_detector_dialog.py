@@ -108,6 +108,7 @@ class SpikesDetectorDialog(QDialog):
         
         # 数据分段部分
         segment_group = QGroupBox("Data Segmentation")
+        segment_group.setFixedHeight(110)  # 进一步降低固定高度
         segment_layout = QVBoxLayout(segment_group)
         
         # 分段数量设置
@@ -233,6 +234,7 @@ class SpikesDetectorDialog(QDialog):
     def _create_segment_control_bar(self):
         """创建分段控制条（用于 Auto 和 Manual 标签页）"""
         segment_bar = QGroupBox("Data Segmentation")
+        segment_bar.setFixedHeight(65)  # 固定高度，防止窗口扩大时变高
         segment_bar_layout = QHBoxLayout(segment_bar)
         segment_bar_layout.setContentsMargins(5, 5, 5, 5)
         

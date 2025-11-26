@@ -11,6 +11,7 @@ from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushBut
                             QGroupBox, QSplitter, QRadioButton, QListWidget, QListWidgetItem,
                             QButtonGroup, QMessageBox, QTableWidget, QTableWidgetItem, 
                             QAbstractItemView, QHeaderView, QDialog, QFormLayout,
+                            QLineEdit, QDialogButtonBox,  # Added QLineEdit and QDialogButtonBox
                             QMenu, QToolButton, QFileDialog)
 from PyQt6.QtCore import Qt, pyqtSignal, QPoint, QTimer
 from PyQt6.QtGui import QColor, QFont, QAction, QIcon
@@ -54,6 +55,9 @@ class ManualSpikeSelector(QWidget):
         # 初始化滑块位置
         self.slider_pos = 0.5  # 初始位置在中间
         
+        # 初始化pop-out窗口引用
+        self.spikes_list_window = None
+        
         # 设置UI
         self.setup_ui()
         
@@ -70,6 +74,9 @@ class ManualSpikeSelector(QWidget):
         # ==================== 左侧：控制面板 ====================
         control_widget = QWidget()
         control_layout = QVBoxLayout(control_widget)
+        
+        # 1.6 初始化分组数据
+        self.spike_groups = ["Default"]
         
         # 1. 手动选择控件分组
         selection_group = QGroupBox("Manual Selection Controls")
@@ -140,57 +147,75 @@ class ManualSpikeSelector(QWidget):
         navigation_group = QGroupBox("Navigation")
         navigation_layout = QVBoxLayout(navigation_group)
         
-        # 滑块控制组
+        
+        # 滑块控制组 - 改为更紧凑的垂直布局
         slider_control_group = QGroupBox("Slider Control")
         slider_layout = QVBoxLayout(slider_control_group)
         
-        # 添加滑块窗口大小控制
-        window_size_layout = QHBoxLayout()
-        window_size_layout.addWidget(QLabel("Window Size (%):"))
+        # 窗口大小控制 - 改为垂直布局
+        window_size_layout = QVBoxLayout()
+        window_size_layout.addWidget(QLabel("Window Size (%)"))
         self.window_size_spin = QSpinBox()
         self.window_size_spin.setRange(1, 50)
-        self.window_size_spin.setValue(10)     # 默认窗口大小为10%
+        self.window_size_spin.setValue(10)
         self.window_size_spin.setToolTip("Set the window size as percentage of total trace")
         window_size_layout.addWidget(self.window_size_spin)
         
-        slider_layout.addLayout(window_size_layout)
-        
-        # 添加滑块步进控制
-        step_size_layout = QHBoxLayout()
-        step_size_layout.addWidget(QLabel("Step Size (%):"))
+        # 步进大小控制 - 改为垂直布局
+        step_size_layout = QVBoxLayout()
+        step_size_layout.addWidget(QLabel("Step Size (%)"))
         self.step_size_spin = QSpinBox()
         self.step_size_spin.setRange(1, 20)
-        self.step_size_spin.setValue(5)     # 默认步进为5%
+        self.step_size_spin.setValue(5)
         self.step_size_spin.setToolTip("Set step size for slider movement buttons")
         step_size_layout.addWidget(self.step_size_spin)
         
-        slider_layout.addLayout(step_size_layout)
+        # 参数控制放在一行
+        params_layout = QHBoxLayout()
+        params_layout.addLayout(window_size_layout)
+        params_layout.addLayout(step_size_layout)
+        slider_layout.addLayout(params_layout)
         
-        # 添加滑块控制按钮
+        # 滑块控制按钮 - 改回横向排列
         slider_buttons_layout = QHBoxLayout()
-        self.slider_left_btn = QPushButton("← Move Left")
-        self.slider_right_btn = QPushButton("Move Right →")
+        self.slider_left_btn = QPushButton("← Left")
+        self.slider_left_btn.setMinimumWidth(120)  # 增加按钮宽度
+        self.slider_right_btn = QPushButton("Right →")
+        self.slider_right_btn.setMinimumWidth(120)  # 增加按钮宽度
         slider_buttons_layout.addWidget(self.slider_left_btn)
         slider_buttons_layout.addWidget(self.slider_right_btn)
-        
         slider_layout.addLayout(slider_buttons_layout)
         
         # 状态标签
-        self.slider_info_label = QLabel("Slider position: 50%")
+        self.slider_info_label = QLabel("Position: 50%")
+        self.slider_info_label.setStyleSheet("font-size: 10px; color: gray;")
         slider_layout.addWidget(self.slider_info_label)
         
-        # 4. 状态标签
-        self.selection_status_label = QLabel("No area selected")
-        self.selection_status_label.setStyleSheet("font-style: italic; color: gray;")
-        
+
         # 5. Spikes 列表组
         spikes_list_group = QGroupBox("Spikes List")
         spikes_list_layout = QVBoxLayout(spikes_list_group)
         
-        # 5.1 创建表格控件显示spikes列表
+        # 5.0 Pop Out 按钮
+        popout_btn_layout = QHBoxLayout()
+        popout_btn_layout.addStretch()
+        self.popout_list_btn = QPushButton("List")
+        self.popout_list_btn.setStyleSheet("background-color: #9C27B0; color: white; font-weight: bold;")
+        self.popout_list_btn.clicked.connect(self.open_spikes_list_window)
+        
+        # 5.1 Manage Groups 按钮
+        self.manage_groups_btn = QPushButton("Groups")
+        self.manage_groups_btn.setStyleSheet("background-color: #FF9800; color: white; font-weight: bold;")
+        self.manage_groups_btn.clicked.connect(self.manage_groups)
+        
+        popout_btn_layout.addWidget(self.manage_groups_btn)
+        popout_btn_layout.addWidget(self.popout_list_btn)
+        spikes_list_layout.addLayout(popout_btn_layout)
+        
+        # 5.2 Spikes 表格
         self.spikes_table = QTableWidget()
-        self.spikes_table.setColumnCount(5)
-        self.spikes_table.setHorizontalHeaderLabels(["ID", "Time (s)", "Amplitude (nA)", "Duration (ms)", "Actions"])
+        self.spikes_table.setColumnCount(6)  # 增加 Group 列
+        self.spikes_table.setHorizontalHeaderLabels(["ID", "Time (s)", "Amplitude (nA)", "Duration (ms)", "Group", "Actions"])
         self.spikes_table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
         self.spikes_table.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
         self.spikes_table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
@@ -201,7 +226,11 @@ class ManualSpikeSelector(QWidget):
         header.setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)  # 时间列
         header.setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)  # 振幅列
         header.setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents)  # 持续时间列
-        header.setSectionResizeMode(4, QHeaderView.ResizeMode.Stretch)  # 操作列
+        header.setSectionResizeMode(4, QHeaderView.ResizeMode.ResizeToContents)  # Group列
+        
+        # 操作列设置为固定宽度，确保按钮不重叠
+        header.setSectionResizeMode(5, QHeaderView.ResizeMode.Fixed)
+        self.spikes_table.setColumnWidth(5, 200)  # Actions列 - 增加到200px确保按钮不重叠
         
         # 5.2 添加排序功能
         self.spikes_table.setSortingEnabled(True)
@@ -227,7 +256,7 @@ class ManualSpikeSelector(QWidget):
         control_layout.addWidget(selection_group)
         control_layout.addWidget(peak_list_group)
         control_layout.addWidget(slider_control_group)  # 添加滑块控制组
-        control_layout.addWidget(self.selection_status_label)
+
         control_layout.addWidget(spikes_list_group)
         
         # ==================== 右侧：绘图区域 ====================
@@ -240,8 +269,8 @@ class ManualSpikeSelector(QWidget):
         main_splitter.addWidget(control_widget)
         main_splitter.addWidget(self.plot_container)
         
-        # 设置分割器初始比例 (减小左侧控制面板宽度)
-        main_splitter.setSizes([250, 750])
+        # 设置分割器初始比例 (减小左侧控制面板宽度，给绘图区域更多空间)
+        main_splitter.setSizes([200, 800])  # 从 250 减小到 200
         main_splitter.setStretchFactor(0, 0)  # 控制面板不伸缩
         main_splitter.setStretchFactor(1, 1)  # 绘图区域可伸缩
         
@@ -300,6 +329,20 @@ class ManualSpikeSelector(QWidget):
             import traceback
             traceback.print_exc()
     
+    def manage_groups(self):
+        """打开组管理对话框"""
+        dialog = GroupManagerDialog(self.spike_groups, self)
+        if dialog.exec():
+            # 更新组列表
+            self.spike_groups = dialog.get_groups()
+            # 刷新表格以更新下拉框选项
+            self.update_spikes_table()
+            
+    def on_spike_group_changed(self, row, group_name):
+        """处理Spike组变更"""
+        if 0 <= row < len(self.manual_spikes):
+            self.manual_spikes[row]['group'] = group_name
+    
     def on_peak_data_changed(self, peak_id, peak_data):
         """处理峰值数据更新（由游标操作触发）"""
         # 更新手动选择图表上显示的峰值
@@ -327,7 +370,7 @@ class ManualSpikeSelector(QWidget):
             }
         
         # 确保必要的UI元素存在
-        required_attributes = ['selection_status_label', 'slider_info_label']
+        required_attributes = ['slider_info_label']
         for attr in required_attributes:
             if not hasattr(self, attr):
                 print(f"Warning: Missing UI element {attr}, creating placeholder")
@@ -342,8 +385,8 @@ class ManualSpikeSelector(QWidget):
             self.manual_fig = self.plot_canvas.fig  # 确保使用正确的引用
             self.manual_fig.clear()
             
-            # 创建子图
-            grid = self.manual_fig.add_gridspec(3, 1, height_ratios=[2, 2, 1])
+            # 创建子图 - 修改高度比例为 1:2:1.5
+            grid = self.manual_fig.add_gridspec(3, 1, height_ratios=[1, 2, 1.5])
             axes = [self.manual_fig.add_subplot(grid[i]) for i in range(3)]
             
             # 保存关键轴的引用
@@ -365,18 +408,27 @@ class ManualSpikeSelector(QWidget):
             
             # 绘制整个轨迹
             self.trace_ax.plot(time_axis, data, linewidth=0.5)
+            self.trace_ax.set_xlim(time_axis[0], time_axis[-1])  # 消除左右空隙
             
-            # 绘制已标记的手动峰值
+            # 绘制已标记的手动峰值 - 只显示当前时间范围内的峰值
+            current_time_start = time_axis[0]
+            current_time_end = time_axis[-1]
+            
             for spike in self.manual_spikes:
-                if 'index' in spike:
-                    peak_idx = spike['index']
-                    # 检查是否是最近添加的峰值，如果是则使用不同颜色高亮显示
-                    if hasattr(self, 'last_added_peak_id') and spike.get('id') == self.last_added_peak_id:
-                        self.trace_ax.plot(time_axis[peak_idx], data[peak_idx], 
-                                        'ro', markersize=8, alpha=0.7)
-                    else:
-                        self.trace_ax.plot(time_axis[peak_idx], data[peak_idx], 
-                                        'go', markersize=8, alpha=0.7)
+                if 'index' in spike and 'time' in spike:
+                    spike_time = spike['time']
+                    # 只绘制在当前时间范围内的 spike
+                    if current_time_start <= spike_time <= current_time_end:
+                        # 找到在当前数据中对应的索引
+                        spike_idx_in_current = np.abs(time_axis - spike_time).argmin()
+                        
+                        # 检查是否是最近添加的峰值，如果是则使用不同颜色高亮显示
+                        if hasattr(self, 'last_added_peak_id') and spike.get('id') == self.last_added_peak_id:
+                            self.trace_ax.plot(time_axis[spike_idx_in_current], data[spike_idx_in_current], 
+                                            'ro', markersize=8, alpha=0.7)
+                        else:
+                            self.trace_ax.plot(time_axis[spike_idx_in_current], data[spike_idx_in_current], 
+                                            'go', markersize=8, alpha=0.7)
             
             # 计算滑块窗口大小
             window_size = self.window_size_spin.value() / 100.0  # 将百分比转换为小数
@@ -403,24 +455,15 @@ class ManualSpikeSelector(QWidget):
             # 在trace_ax中高亮显示当前窗口
             self.trace_ax.axvspan(window_start_time, window_end_time, alpha=0.2, color='green')
             
-            # 创建并添加滑块
-            rect = self.manual_fig.add_axes([0.15, 0.93, 0.7, 0.02])  # 位置和大小
-            self.slider = Slider(
-                ax=rect,
-                label='Position',
-                valmin=0,
-                valmax=max_slider_pos,
-                valinit=adjusted_slider_pos,
-                valstep=0.01
-            )
+            # 滑块创建移动到 tight_layout 之后，以确保对齐
             
-            # 连接滑块值变化事件
-            self.slider.on_changed(self.on_slider_changed)
+            # (滑块事件连接已移动到创建滑块之后)
             
             # 绘制放大视图 (滑块选择的区域)
             self.zoomed_ax.plot(time_axis[start_idx:end_idx+1], data[start_idx:end_idx+1], linewidth=0.5)
+            self.zoomed_ax.set_xlim(window_start_time, window_end_time)  # 消除左右空隙
             
-            # 在zoomed_ax中标记当前窗口中的峰值
+            # 在zoomed_ax中标记当前窗口中的峰值，并用浅绿色高亮已保存的spikes区域
             for spike in self.manual_spikes:
                 if 'index' in spike:
                     peak_idx = spike['index']
@@ -428,6 +471,20 @@ class ManualSpikeSelector(QWidget):
                     
                     # 检查峰值是否在当前窗口中
                     if window_start_time <= peak_time <= window_end_time:
+                        # 添加浅绿色背景高亮已保存的spike区域
+                        spike_start_time = spike.get('start_time', peak_time - 0.001)
+                        spike_end_time = spike.get('end_time', peak_time + 0.001)
+                        
+                        # 确保高亮区域在当前窗口范围内
+                        spike_start_time = max(window_start_time, spike_start_time)
+                        spike_end_time = min(window_end_time, spike_end_time)
+                        
+                        # 添加浅绿色高亮
+                        saved_highlight = self.zoomed_ax.axvspan(spike_start_time, spike_end_time, 
+                                                                alpha=0.15, color='lightgreen')
+                        saved_highlight._is_saved_spike = True  # 标记为已保存的spike
+                        
+                        # 标记峰值点
                         # 检查是否是最近添加的峰值，如果是则使用不同颜色高亮显示
                         if hasattr(self, 'last_added_peak_id') and spike.get('id') == self.last_added_peak_id:
                             self.zoomed_ax.plot(time_axis[peak_idx], data[peak_idx], 
@@ -459,6 +516,38 @@ class ManualSpikeSelector(QWidget):
             # 调整布局
             self.manual_fig.tight_layout()
             
+            # ==================== 创建并对齐滑块 ====================
+            # 在tight_layout之后获取trace_ax的实际位置
+            pos = self.trace_ax.get_position()
+            
+            # 使用trace_ax的宽度和水平位置来创建滑块
+            # 调整：宽度缩短一点 (85%) 并居中，高度再高一点以避免挡住标题
+            slider_height = 0.02
+            
+            # 宽度计算
+            width_scale = 0.85
+            slider_width = pos.width * width_scale
+            slider_left = pos.x0 + (pos.width - slider_width) / 2
+            
+            # 高度计算 - 适当提高位置避免遮挡标题
+            slider_bottom = pos.y1 + 0.025
+            
+            rect = self.manual_fig.add_axes([slider_left, slider_bottom, slider_width, slider_height])
+            self.slider = Slider(
+                ax=rect,
+                label='Position ',  # 注意这里加个空格，避免文字紧贴
+                valmin=0,
+                valmax=max_slider_pos,
+                valinit=adjusted_slider_pos,
+                valstep=0.01
+            )
+            self.slider.label.set_size(9)
+            self.slider.valtext.set_visible(False)  # 隐藏滑块右侧的数值，因为我们有专门的label显示
+            
+            # 连接滑块值变化事件
+            self.slider.on_changed(self.on_slider_changed)
+            
+            
             # 设置选择工具
             self.enable_manual_selection_mode()
             
@@ -486,7 +575,7 @@ class ManualSpikeSelector(QWidget):
         
         # 更新值
         self.slider_pos = val
-        self.slider_info_label.setText(f"Slider position: {val:.1%}")
+        self.slider_info_label.setText(f"Position: {val:.1%}")
         
         # 保存figure3的当前状态
         figure3_data = None
@@ -513,7 +602,7 @@ class ManualSpikeSelector(QWidget):
             self.slider.set_val(new_pos)
         else:
             # 如果滑块不存在，直接更新绘图
-            self.slider_info_label.setText(f"Slider position: {new_pos:.1%}")
+            self.slider_info_label.setText(f"Position: {new_pos:.1%}")
             self.update_manual_plot(preserve_selection=True)
     
     def move_slider_right(self):
@@ -530,7 +619,7 @@ class ManualSpikeSelector(QWidget):
             self.slider.set_val(new_pos)
         else:
             # 如果滑块不存在，直接更新绘图
-            self.slider_info_label.setText(f"Slider position: {new_pos:.1%}")
+            self.slider_info_label.setText(f"Position: {new_pos:.1%}")
             self.update_manual_plot(preserve_selection=True)
     
     # 修复后的enable_manual_selection_mode方法
@@ -703,9 +792,6 @@ class ManualSpikeSelector(QWidget):
             # 计算选择区域的持续时间
             duration_ms = (xmax - xmin) * 1000
             
-            # 更新状态标签
-            self.selection_status_label.setText(
-                f"Selected area: {xmin:.4f}s - {xmax:.4f}s (Duration: {duration_ms:.2f} ms)")
             
             # 获取当前数据和时间轴
             data = self.plot_canvas.current_channel_data
@@ -768,21 +854,58 @@ class ManualSpikeSelector(QWidget):
                 'final_duration': None
             }
             
+            # ==================== 修复高亮管理 ====================
             # 在zoomed_ax中高亮显示选择的区域
-            for collection in self.zoomed_ax.collections:
+            # 关键修复：必须先清除所有旧的临时选择高亮（蓝色）
+            # 但保留已保存spikes的浅绿色高亮
+            
+            # 收集所有需要移除的集合 (collections)
+            collections_to_remove = []
+            for collection in list(self.zoomed_ax.collections):  # 使用list()创建副本
+                # 移除临时选择区域，保留已保存的spike高亮
                 if hasattr(collection, '_is_selection'):
+                    collections_to_remove.append(collection)
+            
+            # 收集所有需要移除的补丁 (patches) - axvspan创建的是Polygon，属于Patch
+            patches_to_remove = []
+            for patch in list(self.zoomed_ax.patches):
+                if hasattr(patch, '_is_selection'):
+                    patches_to_remove.append(patch)
+            
+            # 移除收集到的集合
+            for collection in collections_to_remove:
+                try:
                     collection.remove()
+                except ValueError:
+                    pass
             
+            # 移除收集到的补丁
+            for patch in patches_to_remove:
+                try:
+                    patch.remove()
+                except ValueError:
+                    pass
+            
+            # 添加新的临时选择高亮区域（蓝色）
             span = self.zoomed_ax.axvspan(xmin, xmax, alpha=0.3, color='blue')
-            span._is_selection = True
+            span._is_selection = True  # 标记为临时选择
             
-            # 标记峰值位置
-            for line in self.zoomed_ax.lines:
+            # ==================== 清除旧的峰值标记 ====================
+            # 标记峰值位置 - 移除旧的临时峰值标记
+            lines_to_remove = []
+            for line in list(self.zoomed_ax.lines):  # 使用list()创建副本
                 if hasattr(line, '_is_peak_marker'):
-                    line.remove()
+                    lines_to_remove.append(line)
             
+            for line in lines_to_remove:
+                try:
+                    line.remove()
+                except ValueError:
+                    pass
+            
+            # 添加新的峰值标记（红色圆点）
             marker = self.zoomed_ax.plot(time_axis[peak_idx], data[peak_idx], 'ro', ms=8)[0]
-            marker._is_peak_marker = True
+            marker._is_peak_marker = True  # 标记为临时峰值标记
             
             # 更新第三个子图，显示选中的峰值
             self.update_peak_display()
@@ -795,9 +918,13 @@ class ManualSpikeSelector(QWidget):
                 self.zoomed_ax.set_xlim(saved_xlim)
                 self.zoomed_ax.set_ylim(saved_ylim)
                 
-                # 仅重绘必要的部分
+                # 强制立即重绘canvas以确保高亮区域正确显示
+                # 这对于清除旧的高亮区域非常重要
                 if hasattr(self, 'plot_canvas') and self.plot_canvas is not None:
-                    self.plot_canvas.draw_idle()
+                    # 使用draw()而不是draw_idle()以确保立即刷新
+                    self.plot_canvas.draw()
+                    # 刷新画布以确保所有变更都被应用
+                    self.plot_canvas.flush_events()
             
         except Exception as e:
             import traceback
@@ -920,9 +1047,7 @@ class ManualSpikeSelector(QWidget):
             # 计算选择区域的持续时间
             duration_ms = (xmax - xmin) * 1000
             
-            # 更新状态标签
-            self.selection_status_label.setText(
-                f"Final selection: {xmin:.4f}s - {xmax:.4f}s (Duration: {duration_ms:.2f} ms)")
+
             
             # 备份当前选择的数据
             current_data = self.current_manual_spike_data.copy()
@@ -1130,6 +1255,10 @@ class ManualSpikeSelector(QWidget):
             self.manual_spike_count += 1
             peak_data['id'] = self.manual_spike_count
             
+            # 添加默认组
+            if 'group' not in peak_data:
+                peak_data['group'] = 'Default'
+            
             # 添加到峰值列表
             self.manual_spikes.append(peak_data)
             
@@ -1139,8 +1268,7 @@ class ManualSpikeSelector(QWidget):
             # 更新spikes表格
             self.update_spikes_table()
             
-            # 重置状态
-            self.selection_status_label.setText(f"Added spike #{self.manual_spike_count}")
+
             
             # 标记最后添加的峰值ID，用于高亮显示
             self.last_added_peak_id = self.manual_spike_count
@@ -1151,8 +1279,32 @@ class ManualSpikeSelector(QWidget):
             # 设置标志以避免递归和初始化问题
             self._adding_peak = True
             
-            # 更新绘图，但不更新figure3
-            self.update_manual_plot(preserve_selection=True, update_spike_ax=False)
+            # 清除临时的蓝色选择高亮（因为已经添加到列表中了）
+            # 这将防止蓝色高亮累积
+            # 1. 清除collections
+            collections_to_remove = []
+            for collection in list(self.zoomed_ax.collections):
+                if hasattr(collection, '_is_selection'):
+                    collections_to_remove.append(collection)
+            for collection in collections_to_remove:
+                try:
+                    collection.remove()
+                except (ValueError, AttributeError):
+                    pass
+            
+            # 2. 清除patches (axvspan创建的对象)
+            patches_to_remove = []
+            for patch in list(self.zoomed_ax.patches):
+                if hasattr(patch, '_is_selection'):
+                    patches_to_remove.append(patch)
+            for patch in patches_to_remove:
+                try:
+                    patch.remove()
+                except (ValueError, AttributeError):
+                    pass
+            
+            # 更新绘图（不传递无效参数）
+            self.update_manual_plot(preserve_selection=True)
             
             # 恢复figure3的显示
             self.current_manual_spike_data = current_data
@@ -1197,7 +1349,7 @@ class ManualSpikeSelector(QWidget):
             self.manual_spikes = []
             self.manual_spike_count = 0
             self.peak_count_label.setText("No manual peaks")
-            self.selection_status_label.setText("All manual peaks cleared")
+
             
             # 更新绘图
             self.update_manual_plot()
@@ -1206,28 +1358,35 @@ class ManualSpikeSelector(QWidget):
             self.update_spikes_table()
 
     def export_manual_peaks(self):
-        """将峰值数据导出到文件"""
+        """将峰值数据导出到文件（信息和原始波形数据）"""
         if not self.manual_spikes:
             QMessageBox.warning(self, "Warning", "No peaks to export")
             return
-            
-        # 让用户选择保存位置和格式
+        
+        # 获取数据文件路径作为默认路径
+        default_dir = ""
+        if hasattr(self, 'plot_canvas') and self.plot_canvas:
+            if hasattr(self.plot_canvas, 'file_path') and self.plot_canvas.file_path:
+                default_dir = os.path.dirname(self.plot_canvas.file_path)
+        
+        # 让用户选择保存位置
         file_path, _ = QFileDialog.getSaveFileName(
             self,
             "Export Peaks Data",
-            "",
-            "CSV Files (*.csv);;Excel Files (*.xlsx);;Text Files (*.txt);;All Files (*)"
+            os.path.join(default_dir, "peaks_export.csv") if default_dir else "peaks_export.csv",
+            "CSV Files (*.csv);;All Files (*)"
         )
         
         if not file_path:
             return
             
         try:
-            # 根据文件扩展名决定导出格式
-            _, ext = os.path.splitext(file_path)
+            import csv
+            import os
+            base_path = os.path.splitext(file_path)[0]
             
-            # 准备导出数据
-            headers = ['ID', 'Time (s)', 'Amplitude (nA)', 'Duration (ms)', 'Start Time', 'End Time']
+            # 1. 导出Spike信息到CSV
+            headers = ['ID', 'Time (s)', 'Amplitude (nA)', 'Duration (ms)', 'Start Time', 'End Time', 'Group']
             data = []
             
             for spike in self.manual_spikes:
@@ -1237,42 +1396,72 @@ class ManualSpikeSelector(QWidget):
                     spike.get('amplitude', 0),
                     spike.get('duration', 0) * 1000,  # 转为毫秒
                     spike.get('start_time', 0),
-                    spike.get('end_time', 0)
+                    spike.get('end_time', 0),
+                    spike.get('group', 'Default')
                 ]
                 data.append(row)
                 
-            if ext.lower() == '.csv':
-                # 导出为CSV
-                import csv
-                with open(file_path, 'w', newline='') as f:
-                    writer = csv.writer(f)
-                    writer.writerow(headers)
-                    writer.writerows(data)
+            with open(file_path, 'w', newline='') as f:
+                writer = csv.writer(f)
+                writer.writerow(headers)
+                writer.writerows(data)
+            
+            # 2. 导出每个group的原始波形数据
+            grouped_spikes = {}
+            if self.plot_canvas and self.plot_canvas.current_channel_data is not None:
+                # 按组分组spikes
+                for spike in self.manual_spikes:
+                    group = spike.get('group', 'Default')
+                    if group not in grouped_spikes:
+                        grouped_spikes[group] = []
+                    grouped_spikes[group].append(spike)
+                
+                # 为每个组导出波形数据
+                for group_name, group_spikes in grouped_spikes.items():
+                    group_file = f"{base_path}_{group_name}_waveforms.csv"
                     
-            elif ext.lower() == '.xlsx':
-                # 导出为Excel
-                try:
-                    import pandas as pd
-                    df = pd.DataFrame(data, columns=headers)
-                    df.to_excel(file_path, index=False)
-                except ImportError:
-                    QMessageBox.warning(self, "Warning", "Excel export requires pandas. Using CSV instead.")
-                    with open(file_path + '.csv', 'w', newline='') as f:
+                    with open(group_file, 'w', newline='') as f:
                         writer = csv.writer(f)
-                        writer.writerow(headers)
-                        writer.writerows(data)
                         
-            else:
-                # 导出为文本文件
-                with open(file_path, 'w') as f:
-                    f.write('\t'.join(headers) + '\n')
-                    for row in data:
-                        f.write('\t'.join(map(str, row)) + '\n')
+                        # 写入header
+                        header_row = ['Sample_Index']
+                        for i, spike in enumerate(group_spikes, 1):
+                            spike_id = spike.get('id', i)
+                            header_row.append(f"Spike_{spike_id}")
+                        writer.writerow(header_row)
                         
+                        # 获取最长的spike长度以对齐数据
+                        max_length = 0
+                        spike_waveforms = []
+                        for spike in group_spikes:
+                            start_idx = spike.get('start_idx')
+                            end_idx = spike.get('end_idx')
+                            if start_idx is not None and end_idx is not None:
+                                waveform = self.plot_canvas.current_channel_data[start_idx:end_idx+1]
+                                spike_waveforms.append(waveform)
+                                max_length = max(max_length, len(waveform))
+                            else:
+                                spike_waveforms.append([])
+                        
+                        # 按行写入波形数据
+                        for sample_idx in range(max_length):
+                            row = [sample_idx]
+                            for waveform in spike_waveforms:
+                                if sample_idx < len(waveform):
+                                    row.append(waveform[sample_idx])
+                                else:
+                                    row.append('')  # 空值填充
+                            writer.writerow(row)
+            
+            # Success message
+            msg = f"Exported {len(data)} peaks to:\n- Info: {os.path.basename(file_path)}"
+            if grouped_spikes:
+                msg += f"\n- Waveforms: {len(grouped_spikes)} group file(s)"
+            
             QMessageBox.information(
                 self,
                 "Export Successful",
-                f"Exported {len(data)} peaks to {file_path}"
+                msg
             )
             
             # 更新状态
@@ -1330,27 +1519,47 @@ class ManualSpikeSelector(QWidget):
                 duration_item = QTableWidgetItem(f"{duration_ms:.2f}")
                 self.spikes_table.setItem(row, 3, duration_item)
                 
+                # Group 列 (ComboBox)
+                group_widget = QWidget()
+                group_layout = QHBoxLayout(group_widget)
+                group_layout.setContentsMargins(0, 0, 0, 0)
+                group_combo = QComboBox()
+                group_combo.addItems(self.spike_groups)
+                current_group = spike.get('group', 'Default')
+                
+                # 确保当前组在列表中
+                if current_group not in self.spike_groups:
+                    self.spike_groups.append(current_group)
+                    group_combo.addItem(current_group)
+                
+                group_combo.setCurrentText(current_group)
+                
+                # 连接信号
+                group_combo.currentTextChanged.connect(lambda text, r=row: self.on_spike_group_changed(r, text))
+                group_layout.addWidget(group_combo)
+                self.spikes_table.setCellWidget(row, 4, group_widget)
+                
                 # 操作列 (按钮)
                 action_widget = QWidget()
                 action_layout = QHBoxLayout(action_widget)
                 action_layout.setContentsMargins(2, 2, 2, 2)
                 action_layout.setSpacing(2)
                 
-                # 编辑按钮 - 增加宽度以修复文本显示不全问题
+                # 编辑按钮 - 增加宽度确保文本完整显示
                 edit_btn = QPushButton("Edit")
-                edit_btn.setFixedSize(60, 22)  # 增加宽度从50到60
-                edit_btn.setStyleSheet("background-color: #2196F3; color: white;")
+                edit_btn.setFixedSize(70, 24)  # 进一步增加宽度和高度
+                edit_btn.setStyleSheet("background-color: #2196F3; color: white; font-size: 10px;")
                 edit_btn.clicked.connect(lambda checked, r=row: self.edit_spike(r))
                 
-                # 删除按钮 - 增加宽度以修复文本显示不全问题
+                # 删除按钮 - 增加宽度确保文本完整显示
                 delete_btn = QPushButton("Del")
-                delete_btn.setFixedSize(50, 22)  # 增加宽度从40到50
+                delete_btn.setFixedSize(55, 24)  # 增加宽度和高度
                 delete_btn.setStyleSheet("background-color: #F44336; color: white;")
                 delete_btn.clicked.connect(lambda checked, r=row: self.delete_spike(r))
                 
                 # 跳转按钮
                 goto_btn = QPushButton("→")
-                goto_btn.setFixedSize(30, 22)  # 保持不变，因为只是一个箭头
+                goto_btn.setFixedSize(32, 24)  # 调整高度与其他按钮一致
                 goto_btn.setStyleSheet("background-color: #4CAF50; color: white;")
                 goto_btn.clicked.connect(lambda checked, r=row: self.goto_spike(r))
                 
@@ -1359,7 +1568,7 @@ class ManualSpikeSelector(QWidget):
                 action_layout.addWidget(goto_btn)
                 action_layout.addStretch()
                 
-                self.spikes_table.setCellWidget(row, 4, action_widget)
+                self.spikes_table.setCellWidget(row, 5, action_widget)
                 
             # 恢复排序功能
             self.spikes_table.setSortingEnabled(True)
@@ -1367,6 +1576,17 @@ class ManualSpikeSelector(QWidget):
             # 如果表格中有数据，选择第一行
             if required_rows > 0:
                 self.spikes_table.selectRow(0)
+            
+            # 如果pop-out窗口存在且可见,也更新它的表格
+            if self.spikes_list_window is not None and self.spikes_list_window.isVisible():
+                self.spikes_list_window.update_table()
+            
+            # 注释掉自动更新统计窗口以提高性能
+            # 用户可以使用每个窗口的Refresh按钮手动更新
+            # if hasattr(self, 'statistics_windows'):
+            #     for group_name, window in self.statistics_windows.items():
+            #         if window.isVisible():
+            #             window.update_plot()
                 
         except Exception as e:
             import traceback
@@ -1481,7 +1701,7 @@ class ManualSpikeSelector(QWidget):
             self.spikes_table.selectRow(row)
             
             # 通知用户
-            self.selection_status_label.setText(f"Navigated to spike #{spike_data.get('id', row + 1)}")
+
             
         except Exception as e:
             import traceback
@@ -1638,6 +1858,8 @@ class ManualSpikeSelector(QWidget):
             self.clear_peaks_btn.clicked.connect(self.clear_manual_peaks)
         if hasattr(self, 'export_peaks_btn'):
             self.export_peaks_btn.clicked.connect(self.export_manual_peaks)
+        if hasattr(self, 'popout_list_btn'):
+            self.popout_list_btn.clicked.connect(self.open_spikes_list_window)
         
         # 滑块控制按钮
         if hasattr(self, 'slider_left_btn'):
@@ -1681,9 +1903,354 @@ class ManualSpikeSelector(QWidget):
             
         # 更新峰值显示
         self.update_peak_display()
+    
+    def open_spikes_list_window(self):
+        """打开或显示spikes列表弹出窗口"""
+        try:
+            # 如果窗口已经存在，则显示并激活它
+            if self.spikes_list_window is not None:
+                self.spikes_list_window.show()
+                self.spikes_list_window.raise_()
+                self.spikes_list_window.activateWindow()
+                # 更新表格内容
+                self.spikes_list_window.update_table()
+                return
+            
+            # 创建新窗口
+            self.spikes_list_window = SpikesListWindow(parent=self)
+            
+            # 更新表格内容
+            self.spikes_list_window.update_table()
+            
+            # 显示窗口
+            self.spikes_list_window.show()
+            
+        except Exception as e:
+            import traceback
+            print(f"Error opening spikes list window: {e}")
+            print(traceback.format_exc())
+            QMessageBox.warning(
+                self,
+                "Error",
+                f"Failed to open spikes list window: {str(e)}"
+            )
+
+
+
+class SpikesListWindow(QDialog):
+    """独立的Spikes列表窗口"""
+    
+    def __init__(self, parent=None):
+        super(SpikesListWindow, self).__init__(parent)
+        self.parent_selector = parent
+        self.setWindowTitle("Spikes List")
+        self.resize(800, 600)
+        
+        # 设置UI
+        self.setup_ui()
+        
+        # 连接信号
+        self.connect_signals()
+    
+    def setup_ui(self):
+        """设置UI"""
+        layout = QVBoxLayout(self)
+        
+        # 标题和统计信息
+        header_layout = QHBoxLayout()
+        self.title_label = QLabel("Manual Spikes List")
+        self.title_label.setStyleSheet("font-size: 16px; font-weight: bold;")
+        header_layout.addWidget(self.title_label)
+        
+        header_layout.addStretch()
+        
+        self.count_label = QLabel("No spikes")
+        self.count_label.setStyleSheet("font-size: 12px; color: gray;")
+        header_layout.addWidget(self.count_label)
+        
+        # Statistics 按钮
+        self.statistics_btn = QPushButton("Statistics")
+        self.statistics_btn.setStyleSheet("background-color: #009688; color: white; font-weight: bold;")
+        self.statistics_btn.clicked.connect(self.open_statistics)
+        header_layout.addWidget(self.statistics_btn)
+        
+        layout.addLayout(header_layout)
+        
+        # 创建表格控件显示spikes列表
+        self.spikes_table = QTableWidget()
+        self.spikes_table.setColumnCount(6)  # 增加 Group 列
+        self.spikes_table.setHorizontalHeaderLabels(["ID", "Time (s)", "Amplitude (nA)", "Duration (ms)", "Group", "Actions"])
+        self.spikes_table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
+        self.spikes_table.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
+        self.spikes_table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+        
+        # 设置列宽
+        header = self.spikes_table.horizontalHeader()
+        header.setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)  # ID列
+        header.setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)  # 时间列
+        header.setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)  # 振幅列
+        header.setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents)  # 持续时间列
+        header.setSectionResizeMode(4, QHeaderView.ResizeMode.ResizeToContents)  # Group列
+        
+        # 操作列设置为固定宽度，确保按钮不重叠
+        header.setSectionResizeMode(5, QHeaderView.ResizeMode.Fixed)
+        self.spikes_table.setColumnWidth(5, 200)  # 增加到200px确保按钮不重叠
+        
+        # 添加排序功能
+        self.spikes_table.setSortingEnabled(True)
+        
+        layout.addWidget(self.spikes_table)
+        
+        # 创建排序控件
+        sort_layout = QHBoxLayout()
+        sort_layout.addWidget(QLabel("Sort by:"))
+        
+        self.sort_combo = QComboBox()
+        self.sort_combo.addItems(["ID", "Time", "Amplitude", "Duration"])
+        sort_layout.addWidget(self.sort_combo)
+        
+        self.sort_order_check = QCheckBox("Descending")
+        sort_layout.addWidget(self.sort_order_check)
+        
+        sort_layout.addStretch(1)
+        
+        layout.addLayout(sort_layout)
+        
+        # 底部按钮
+        buttons_layout = QHBoxLayout()
+        buttons_layout.addStretch()
+        
+        self.close_button = QPushButton("Close")
+        self.close_button.clicked.connect(self.close)
+        buttons_layout.addWidget(self.close_button)
+        
+        layout.addLayout(buttons_layout)
+    
+    def connect_signals(self):
+        """连接信号"""
+        # 排序控件
+        if hasattr(self, 'sort_combo') and hasattr(self, 'sort_order_check'):
+            self.sort_combo.currentIndexChanged.connect(self.apply_sort)
+            self.sort_order_check.stateChanged.connect(self.apply_sort)
+        
+        # 表格头部点击
+        if hasattr(self, 'spikes_table'):
+            self.spikes_table.horizontalHeader().sectionClicked.connect(self.on_table_header_clicked)
+    
+    def update_table(self):
+        """更新表格显示"""
+        if not self.parent_selector:
+            return
+            
+        try:
+            # 断开排序信号以避免刷新表格时触发排序
+            self.spikes_table.setSortingEnabled(False)
+            
+            # 获取父窗口的spikes数据
+            manual_spikes = self.parent_selector.manual_spikes
+            
+            # 更新计数标签
+            if len(manual_spikes) > 0:
+                self.count_label.setText(f"Total: {len(manual_spikes)} spike(s)")
+            else:
+                self.count_label.setText("No spikes")
+            
+            # 获取当前行数
+            current_rows = self.spikes_table.rowCount()
+            required_rows = len(manual_spikes)
+            
+            # 调整行数
+            if current_rows < required_rows:
+                # 添加行
+                for i in range(current_rows, required_rows):
+                    self.spikes_table.insertRow(i)
+            elif current_rows > required_rows:
+                # 删除多余行
+                for i in range(current_rows - 1, required_rows - 1, -1):
+                    self.spikes_table.removeRow(i)
+            
+            # 填充或更新表格数据
+            for row, spike in enumerate(manual_spikes):
+                # ID列
+                id_item = QTableWidgetItem(str(spike.get('id', row + 1)))
+                self.spikes_table.setItem(row, 0, id_item)
+                
+                # 时间列 (秒)
+                time_item = QTableWidgetItem(f"{spike.get('time', 0):.4f}")
+                self.spikes_table.setItem(row, 1, time_item)
+                
+                # 振幅列 (nA)
+                amp_item = QTableWidgetItem(f"{spike.get('amplitude', 0):.4f}")
+                self.spikes_table.setItem(row, 2, amp_item)
+                
+                # 持续时间列 (转为毫秒)
+                duration_ms = spike.get('duration', 0) * 1000  # 秒转为毫秒
+                duration_item = QTableWidgetItem(f"{duration_ms:.2f}")
+                self.spikes_table.setItem(row, 3, duration_item)
+                
+                # Group 列 (ComboBox)
+                group_widget = QWidget()
+                group_layout = QHBoxLayout(group_widget)
+                group_layout.setContentsMargins(0, 0, 0, 0)
+                group_combo = QComboBox()
+                group_combo.addItems(self.parent_selector.spike_groups)
+                current_group = spike.get('group', 'Default')
+                
+                # 确保当前组在列表中
+                if current_group not in self.parent_selector.spike_groups:
+                    self.parent_selector.spike_groups.append(current_group)
+                    group_combo.addItem(current_group)
+                
+                group_combo.setCurrentText(current_group)
+                
+                # 连接信号
+                group_combo.currentTextChanged.connect(lambda text, r=row: self.parent_selector.on_spike_group_changed(r, text))
+                group_layout.addWidget(group_combo)
+                self.spikes_table.setCellWidget(row, 4, group_widget)
+                
+                # 操作列 (按钮)
+                action_widget = QWidget()
+                action_layout = QHBoxLayout(action_widget)
+                action_layout.setContentsMargins(2, 2, 2, 2)
+                action_layout.setSpacing(2)
+                
+                # 编辑按钮
+                edit_btn = QPushButton("Edit")
+                edit_btn.setFixedSize(70, 24)  # 与主窗口按钮保持一致
+                edit_btn.setStyleSheet("background-color: #2196F3; color: white; font-size: 10px;")
+                edit_btn.clicked.connect(lambda checked, r=row: self.edit_spike(r))
+                
+                # 删除按钮
+                delete_btn = QPushButton("Del")
+                delete_btn.setFixedSize(55, 24)  # 与主窗口按钮保持一致
+                delete_btn.setStyleSheet("background-color: #F44336; color: white;")
+                delete_btn.clicked.connect(lambda checked, r=row: self.delete_spike(r))
+                
+                # 跳转按钮
+                goto_btn = QPushButton("→")
+                goto_btn.setFixedSize(32, 24)  # 与主窗口按钮保持一致
+                goto_btn.setStyleSheet("background-color: #4CAF50; color: white;")
+                goto_btn.clicked.connect(lambda checked, r=row: self.goto_spike(r))
+                
+                action_layout.addWidget(edit_btn)
+                action_layout.addWidget(delete_btn)
+                action_layout.addWidget(goto_btn)
+                action_layout.addStretch()
+                
+                self.spikes_table.setCellWidget(row, 5, action_widget)
+            
+            # 恢复排序功能
+            self.spikes_table.setSortingEnabled(True)
+            
+            # 如果表格中有数据，选择第一行
+            if required_rows > 0:
+                self.spikes_table.selectRow(0)
+                
+        except Exception as e:
+            import traceback
+            print(f"Error updating spikes table in pop-out window: {e}")
+            print(traceback.format_exc())
+    
+    def edit_spike(self, row):
+        """编辑指定行的spike"""
+        if self.parent_selector:
+            self.parent_selector.edit_spike(row)
+    
+    def delete_spike(self, row):
+        """删除指定行的spike"""
+        if self.parent_selector:
+            self.parent_selector.delete_spike(row)
+    
+    def goto_spike(self, row):
+        """跳转到指定的spike"""
+        if self.parent_selector:
+            self.parent_selector.goto_spike(row)
+    
+    def apply_sort(self):
+        """应用排序"""
+        if not self.parent_selector:
+            return
+            
+        # 获取排序列和顺序
+        sort_column_name = self.sort_combo.currentText()
+        descending = self.sort_order_check.isChecked()
+        
+        # 映射列名到索引
+        column_map = {
+            "ID": 0,
+            "Time": 1,
+            "Amplitude": 2,
+            "Duration": 3
+        }
+        
+        column = column_map.get(sort_column_name, 0)
+        order = Qt.SortOrder.DescendingOrder if descending else Qt.SortOrder.AscendingOrder
+        
+        # 对表格进行排序
+        self.spikes_table.sortItems(column, order)
+    
+    def on_table_header_clicked(self, logical_index):
+        """处理表头点击事件"""
+        # 根据点击的列进行排序
+        current_order = self.spikes_table.horizontalHeader().sortIndicatorOrder()
+        new_order = Qt.SortOrder.DescendingOrder if current_order == Qt.SortOrder.AscendingOrder else Qt.SortOrder.AscendingOrder
+        self.spikes_table.sortItems(logical_index, new_order)
+    
+    def open_statistics(self):
+        """打开统计分析对话框 - 每个组一个独立窗口"""
+        if not self.parent_selector or not self.parent_selector.manual_spikes:
+            QMessageBox.information(self, "No Data", "No spikes available for statistics.")
+            return
+        
+        # 按组分组spikes
+        grouped_spikes = {}
+        for spike in self.parent_selector.manual_spikes:
+            group = spike.get('group', 'Default')
+            if group not in grouped_spikes:
+                grouped_spikes[group] = []
+            grouped_spikes[group].append(spike)
+        
+        # 过滤掉空组
+        grouped_spikes = {k: v for k, v in grouped_spikes.items() if v}
+        
+        if not grouped_spikes:
+            QMessageBox.information(self, "No Data", "No spikes in any group.")
+            return
+        
+        # 如果没有statistics_windows属性，创建它
+        if not hasattr(self.parent_selector, 'statistics_windows'):
+            self.parent_selector.statistics_windows = {}
+        
+        # 为每个组创建或更新统计窗口
+        for group_name, group_spikes in grouped_spikes.items():
+            # 如果该组的窗口已经存在且可见，激活它
+            if group_name in self.parent_selector.statistics_windows:
+                window = self.parent_selector.statistics_windows[group_name]
+                if window.isVisible():
+                    window.raise_()
+                    window.activateWindow()
+                    window.update_plot()  # 更新现有窗口
+                    continue
+            
+            # 创建新窗口
+            window = GroupStatisticsWindow(
+                group_name,
+                self.parent_selector,
+                self
+            )
+            self.parent_selector.statistics_windows[group_name] = window
+            window.show()
+    
+    def closeEvent(self, event):
+        """处理窗口关闭事件"""
+        # 通知父窗口，pop-out窗口已关闭
+        if self.parent_selector and hasattr(self.parent_selector, 'spikes_list_window'):
+            self.parent_selector.spikes_list_window = None
+        super().closeEvent(event)
 
 
 class SpikeEditDialog(QDialog):
+
     """用于编辑峰值参数的对话框"""
     
     def __init__(self, spike_data, parent=None):
@@ -1764,3 +2331,248 @@ class SpikeEditDialog(QDialog):
         self.spike_data['end_time'] = self.end_time_spin.value()
         
         return self.spike_data
+
+
+class GroupStatisticsWindow(QDialog):
+    """单个组的统计分析窗口 - 可实时更新"""
+    def __init__(self, group_name, parent_selector, parent=None):
+        super().__init__(parent)
+        self.group_name = group_name
+        self.parent_selector = parent_selector
+        
+        self.setWindowTitle(f"Statistics - {group_name}")
+        self.resize(1000, 500)
+        
+        self.setup_ui()
+        self.connect_signals()
+        self.update_plot()
+        
+    def setup_ui(self):
+        """设置UI"""
+        layout = QVBoxLayout(self)
+        
+        # 创建matplotlib画布
+        self.figure = Figure(figsize=(10, 5))
+        self.canvas = FigureCanvas(self.figure)
+        layout.addWidget(self.canvas)
+        
+        # 底部按钮和控件
+        btn_layout = QHBoxLayout()
+        
+        refresh_btn = QPushButton("Refresh")
+        refresh_btn.clicked.connect(self.update_plot)
+        btn_layout.addWidget(refresh_btn)
+        
+        # Bin number 控件
+        btn_layout.addWidget(QLabel("Bins:"))
+        self.bin_spinbox = QSpinBox()
+        self.bin_spinbox.setRange(5, 50)
+        self.bin_spinbox.setValue(15)
+        self.bin_spinbox.setFixedWidth(60)
+        self.bin_spinbox.valueChanged.connect(self.update_plot)
+        btn_layout.addWidget(self.bin_spinbox)
+        
+        btn_layout.addStretch()
+        
+        close_btn = QPushButton("Close")
+        close_btn.clicked.connect(self.close)
+        btn_layout.addWidget(close_btn)
+        
+        layout.addLayout(btn_layout)
+        
+    def connect_signals(self):
+        """连接信号以实现实时更新"""
+        # 注释掉自动更新以提高性能
+        # 用户可以使用Refresh按钮手动更新
+        # 连接到ManualSpikeSelector的信号
+        # if self.parent_selector:
+        #     # 当添加、删除或更新spike时，刷新统计图
+        #     if hasattr(self.parent_selector, 'peak_added'):
+        #         self.parent_selector.peak_added.connect(self.on_spike_changed)
+        #     if hasattr(self.parent_selector, 'peak_deleted'):
+        #         self.parent_selector.peak_deleted.connect(self.on_spike_changed)
+        #     if hasattr(self.parent_selector, 'peak_updated'):
+        #         self.parent_selector.peak_updated.connect(self.on_spike_changed)
+        pass
+    
+    def on_spike_changed(self, *args):
+        """当spike数据变化时更新图表"""
+        self.update_plot()
+        
+    def update_plot(self):
+        """更新统计图表"""
+        # 获取当前组的spikes
+        group_spikes = [s for s in self.parent_selector.manual_spikes if s.get('group') == self.group_name]
+        
+        if not group_spikes:
+            self.figure.clear()
+            ax = self.figure.add_subplot(111)
+            ax.text(0.5, 0.5, f"No spikes in {self.group_name}", 
+                   ha='center', va='center', fontsize=14)
+            self.canvas.draw()
+            return
+        
+        # 清除现有图表
+        self.figure.clear()
+        
+        # Plot 1: 叠加的spikes波形 (左, 40%)
+        # Plot 2: 散点图 + 边缘直方图 (右, 60%)
+        ax1 = self.figure.add_subplot(1, 2, 1)
+        self.plot_overlaid_spikes(ax1, group_spikes)
+        
+        ax2_main = self.figure.add_subplot(1, 2, 2)
+        self.plot_scatter_with_histograms(ax2_main, group_spikes)
+        
+        # 调整布局，增加子图之间的间距
+        self.figure.subplots_adjust(left=0.08, right=0.95, top=0.92, bottom=0.1, wspace=0.35)
+        self.canvas.draw()
+        
+    def plot_overlaid_spikes(self, ax, spikes):
+        """绘制叠加的spike波形（时间从0开始）"""
+        ax.set_title(f"{self.group_name} - Overlaid Spikes ({len(spikes)} spikes)")
+        ax.set_xlabel("Time (ms)")
+        ax.set_ylabel("Amplitude (nA)")
+        
+        # 获取数据和采样率
+        if not self.parent_selector.plot_canvas:
+            return
+        
+        data = self.parent_selector.plot_canvas.current_channel_data
+        sampling_rate = self.parent_selector.plot_canvas.sampling_rate
+        
+        if data is None or sampling_rate is None:
+            return
+        
+        for spike in spikes:
+            # 获取spike的起止索引
+            start_idx = spike.get('start_idx')
+            end_idx = spike.get('end_idx')
+            
+            if start_idx is None or end_idx is None:
+                continue
+            
+            # 提取波形数据
+            waveform = data[start_idx:end_idx+1]
+            
+            # 创建时间轴（从0开始，单位：毫秒）
+            duration_samples = len(waveform)
+            time_ms = np.arange(duration_samples) / (sampling_rate / 1000.0)
+            
+            # 绘制波形
+            ax.plot(time_ms, waveform, alpha=0.5, linewidth=0.8)
+        
+        ax.grid(True, alpha=0.3)
+        
+    def plot_scatter_with_histograms(self, ax_main, spikes):
+        """绘制散点图并添加边缘直方图"""
+        # 提取duration和amplitude数据
+        durations = []
+        amplitudes = []
+        for spike in spikes:
+            dur = spike.get('duration', 0) * 1000  # 转为毫秒
+            amp = spike.get('amplitude', 0)
+            durations.append(dur)
+            amplitudes.append(amp)
+        
+        if not durations or not amplitudes:
+            return
+        
+        # 使用gridspec创建子图布局以确保对齐
+        from matplotlib.gridspec import GridSpec
+        
+        # 获取ax_main的位置
+        pos = ax_main.get_position()
+        
+        # 移除原来的ax_main
+        ax_main.remove()
+        
+        # 创建gridspec布局 (3x3, 但只使用部分)
+        # height_ratios: [histogram_height, gap, scatter_height]
+        # width_ratios: [scatter_width, gap, histogram_width]
+        gs = GridSpec(3, 3, 
+                     left=pos.x0, right=pos.x0 + pos.width,
+                     bottom=pos.y0, top=pos.y0 + pos.height,
+                     height_ratios=[0.2, 0.02, 1],
+                     width_ratios=[1, 0.02, 0.2],
+                     hspace=0, wspace=0,
+                     figure=self.figure)
+        
+        # 创建散点图 (bottom-left)
+        ax_scatter = self.figure.add_subplot(gs[2, 0])
+        ax_scatter.scatter(durations, amplitudes, alpha=0.6, s=30, edgecolors='black', linewidth=0.5)
+        ax_scatter.set_xlabel("Duration (ms)")
+        ax_scatter.set_ylabel("Amplitude (nA)")
+        ax_scatter.set_title(f"{self.group_name} - Duration vs Amplitude")
+        ax_scatter.grid(True, alpha=0.3)
+        
+        # 创建上方直方图 (top-left, 与散点图x轴对齐)
+        ax_top = self.figure.add_subplot(gs[0, 0], sharex=ax_scatter)
+        bins = self.bin_spinbox.value() if hasattr(self, 'bin_spinbox') else 15
+        ax_top.hist(durations, bins=bins, alpha=0.7, edgecolor='black')
+        ax_top.set_ylabel("Count", fontsize=9)
+        ax_top.tick_params(axis='x', labelbottom=False)  # 隐藏x轴标签
+        ax_top.tick_params(axis='y', labelsize=8)
+        
+        # 创建右方直方图 (bottom-right, 与散点图y轴对齐)
+        ax_right = self.figure.add_subplot(gs[2, 2], sharey=ax_scatter)
+        ax_right.hist(amplitudes, bins=bins, orientation='horizontal', alpha=0.7, edgecolor='black')
+        ax_right.set_xlabel("Count", fontsize=9)
+        ax_right.tick_params(axis='y', labelleft=False)  # 隐藏y轴标签
+        ax_right.tick_params(axis='x', labelsize=8)
+
+
+class GroupManagerDialog(QDialog):
+    """组管理对话框"""
+    def __init__(self, current_groups, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Manage Groups")
+        self.setFixedSize(300, 400)
+        self.groups = list(current_groups)
+        
+        layout = QVBoxLayout(self)
+        
+        # 组列表
+        self.list_widget = QListWidget()
+        self.list_widget.addItems(self.groups)
+        layout.addWidget(self.list_widget)
+        
+        # 添加组
+        add_layout = QHBoxLayout()
+        self.new_group_input = QLineEdit()
+        self.new_group_input.setPlaceholderText("New Group Name")
+        add_btn = QPushButton("Add")
+        add_btn.clicked.connect(self.add_group)
+        add_layout.addWidget(self.new_group_input)
+        add_layout.addWidget(add_btn)
+        layout.addLayout(add_layout)
+        
+        # 删除组
+        del_btn = QPushButton("Delete Selected")
+        del_btn.clicked.connect(self.delete_group)
+        layout.addWidget(del_btn)
+        
+        # 确认按钮
+        button_box = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
+        button_box.accepted.connect(self.accept)
+        button_box.rejected.connect(self.reject)
+        layout.addWidget(button_box)
+        
+    def add_group(self):
+        name = self.new_group_input.text().strip()
+        if name and name not in self.groups:
+            self.groups.append(name)
+            self.list_widget.addItem(name)
+            self.new_group_input.clear()
+            
+    def delete_group(self):
+        current_row = self.list_widget.currentRow()
+        if current_row >= 0:
+            item = self.list_widget.item(current_row)
+            if item.text() == "Default":
+                QMessageBox.warning(self, "Warning", "Cannot delete Default group")
+                return
+            self.groups.pop(current_row)
+            self.list_widget.takeItem(current_row)
+            
+    def get_groups(self):
+        return self.groups

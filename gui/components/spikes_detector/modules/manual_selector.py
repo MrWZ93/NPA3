@@ -186,11 +186,6 @@ class ManualSpikeSelector(QWidget):
         slider_buttons_layout.addWidget(self.slider_right_btn)
         slider_layout.addLayout(slider_buttons_layout)
         
-        # 状态标签
-        self.slider_info_label = QLabel("Position: 50%")
-        self.slider_info_label.setStyleSheet("font-size: 10px; color: gray;")
-        slider_layout.addWidget(self.slider_info_label)
-        
 
         # 5. Spikes 列表组
         spikes_list_group = QGroupBox("Spikes List")
@@ -369,8 +364,8 @@ class ManualSpikeSelector(QWidget):
                 'ylim': self.spike_ax.get_ylim()
             }
         
-        # 确保必要的UI元素存在
-        required_attributes = ['slider_info_label']
+        # 确保必要的UI元素存在（移除了slider_info_label检查）
+        required_attributes = []
         for attr in required_attributes:
             if not hasattr(self, attr):
                 print(f"Warning: Missing UI element {attr}, creating placeholder")
@@ -452,12 +447,15 @@ class ManualSpikeSelector(QWidget):
             start_idx = np.abs(time_axis - window_start_time).argmin()
             end_idx = np.abs(time_axis - window_end_time).argmin()
             
-            # 在trace_ax中高亮显示当前窗口
-            self.trace_ax.axvspan(window_start_time, window_end_time, alpha=0.2, color='green')
-            
-            # 滑块创建移动到 tight_layout 之后，以确保对齐
-            
-            # (滑块事件连接已移动到创建滑块之后)
+            # 在trace_ax上用好看的绿色标记当前窗口位置
+            self.trace_ax.axvspan(
+                window_start_time, 
+                window_end_time, 
+                facecolor='#4CAF50',  # Material Design 绿色，更现代好看
+                alpha=0.2,
+                edgecolor='#388E3C',  # 深一点的绿色边缘
+                linewidth=1.5
+            )
             
             # 绘制放大视图 (滑块选择的区域)
             self.zoomed_ax.plot(time_axis[start_idx:end_idx+1], data[start_idx:end_idx+1], linewidth=0.5)
@@ -479,9 +477,9 @@ class ManualSpikeSelector(QWidget):
                         spike_start_time = max(window_start_time, spike_start_time)
                         spike_end_time = min(window_end_time, spike_end_time)
                         
-                        # 添加浅绿色高亮
+                        # 添加浅绿色高亮 - 调得稍微深一点，便于看清
                         saved_highlight = self.zoomed_ax.axvspan(spike_start_time, spike_end_time, 
-                                                                alpha=0.15, color='lightgreen')
+                                                                alpha=0.12, color='lightgreen')  # alpha从0.05调到0.12，稍微深一点
                         saved_highlight._is_saved_spike = True  # 标记为已保存的spike
                         
                         # 标记峰值点
@@ -522,30 +520,18 @@ class ManualSpikeSelector(QWidget):
             
             # 使用trace_ax的宽度和水平位置来创建滑块
             # 调整：宽度缩短一点 (85%) 并居中，高度再高一点以避免挡住标题
-            slider_height = 0.02
+            # 点击subplot1即可跳转到该位置（不再需要拖动相关的标志）
             
-            # 宽度计算
-            width_scale = 0.85
-            slider_width = pos.width * width_scale
-            slider_left = pos.x0 + (pos.width - slider_width) / 2
+            # 断开旧的事件连接（如果存在）
+            if hasattr(self, '_drag_press_cid'):
+                self.manual_fig.canvas.mpl_disconnect(self._drag_press_cid)
+            if hasattr(self, '_drag_release_cid'):
+                self.manual_fig.canvas.mpl_disconnect(self._drag_release_cid)
+            if hasattr(self, '_drag_motion_cid'):
+                self.manual_fig.canvas.mpl_disconnect(self._drag_motion_cid)
             
-            # 高度计算 - 适当提高位置避免遮挡标题
-            slider_bottom = pos.y1 + 0.025
-            
-            rect = self.manual_fig.add_axes([slider_left, slider_bottom, slider_width, slider_height])
-            self.slider = Slider(
-                ax=rect,
-                label='Position ',  # 注意这里加个空格，避免文字紧贴
-                valmin=0,
-                valmax=max_slider_pos,
-                valinit=adjusted_slider_pos,
-                valstep=0.01
-            )
-            self.slider.label.set_size(9)
-            self.slider.valtext.set_visible(False)  # 隐藏滑块右侧的数值，因为我们有专门的label显示
-            
-            # 连接滑块值变化事件
-            self.slider.on_changed(self.on_slider_changed)
+            # 连接鼠标事件并保存连接ID（只需要press事件）
+            self._drag_press_cid = self.manual_fig.canvas.mpl_connect('button_press_event', self.on_highlight_press)
             
             
             # 设置选择工具
@@ -568,14 +554,58 @@ class ManualSpikeSelector(QWidget):
             import traceback
             traceback.print_exc()
     
-    def on_slider_changed(self, val):
+    def on_highlight_press(self, event):
+        """点击subplot1时，将绿色highlight的中心移动到点击位置"""
+        # 检查必要的属性是否存在
+        if not hasattr(self, 'trace_ax'):
+            return
+        
+        if event.inaxes != self.trace_ax or event.button != 1:
+            return
+        
+        if event.xdata is None:
+            return
+        
+        # 获取数据范围
+        if not hasattr(self, 'plot_canvas') or self.plot_canvas is None:
+            return
+            
+        time_axis = self.plot_canvas.time_axis
+        if time_axis is None or len(time_axis) == 0:
+            return
+        
+        total_time = time_axis[-1] - time_axis[0]
+        window_size = self.window_size_spin.value() / 100.0
+        
+        # 计算点击位置对应的slider_pos
+        # 使点击位置成为窗口的中心
+        click_time = event.xdata
+        window_center_pos = (click_time - time_axis[0]) / total_time
+        
+        # 调整为窗口左边界的位置
+        new_pos = window_center_pos - window_size / 2.0
+        new_pos = max(0.0, min(1.0 - window_size, new_pos))
+        
+        self.slider_pos = new_pos
+        
+        # 更新显示
+        self.update_manual_plot(preserve_selection=True)
+    
+    def on_highlight_release(self, event):
+        """不再需要release处理"""
+        pass
+    
+    def on_highlight_drag(self, event):
+        """不再需要drag处理"""
+        pass
+    
+    def on_slider_changed_old(self, val):
         """处理滑块值变化"""
         # 保存之前的值
         old_val = self.slider_pos
         
         # 更新值
         self.slider_pos = val
-        self.slider_info_label.setText(f"Position: {val:.1%}")
         
         # 保存figure3的当前状态
         figure3_data = None
@@ -592,35 +622,18 @@ class ManualSpikeSelector(QWidget):
             self.update_peak_display()
     
     def move_slider_left(self):
-        """向左移动滑块"""
+        """向左移动highlight"""
         step_size = self.step_size_spin.value() / 100.0  # 将百分比转换为小数
         new_pos = max(0, self.slider_pos - step_size)
         self.slider_pos = new_pos
-        
-        # 更新滑块界面值 (如果存在)
-        if hasattr(self, 'slider') and self.slider:
-            self.slider.set_val(new_pos)
-        else:
-            # 如果滑块不存在，直接更新绘图
-            self.slider_info_label.setText(f"Position: {new_pos:.1%}")
-            self.update_manual_plot(preserve_selection=True)
+        self.update_manual_plot(preserve_selection=True)
     
     def move_slider_right(self):
-        """向右移动滑块"""
+        """向右移动highlight"""
         step_size = self.step_size_spin.value() / 100.0  # 将百分比转换为小数
-        window_size = self.window_size_spin.value() / 100.0  # 将百分比转换为小数
-        max_pos = max(0, 1.0 - window_size)  # 确保窗口不超出数据范围
-        
-        new_pos = min(max_pos, self.slider_pos + step_size)
+        new_pos = min(1, self.slider_pos + step_size)
         self.slider_pos = new_pos
-        
-        # 更新滑块界面值 (如果存在)
-        if hasattr(self, 'slider') and self.slider:
-            self.slider.set_val(new_pos)
-        else:
-            # 如果滑块不存在，直接更新绘图
-            self.slider_info_label.setText(f"Position: {new_pos:.1%}")
-            self.update_manual_plot(preserve_selection=True)
+        self.update_manual_plot(preserve_selection=True)
     
     # 修复后的enable_manual_selection_mode方法
     def enable_manual_selection_mode(self):
@@ -644,9 +657,20 @@ class ManualSpikeSelector(QWidget):
                 self.on_final_span_select,
                 'horizontal',
                 useblit=True,
-                props=dict(alpha=0.3, facecolor='red'),
+                props=dict(alpha=0.05, facecolor='red', zorder=0),  # 调浅，从0.3改为0.05，添加zorder=0
                 interactive=True,
                 drag_from_anywhere=True
+            )
+            
+            # 添加右键点击事件处理：右键点击选中的区域即可保存
+            if hasattr(self, '_spike_ax_right_click_cid'):
+                try:
+                    self.spike_ax.figure.canvas.mpl_disconnect(self._spike_ax_right_click_cid)
+                except Exception:
+                    pass
+            self._spike_ax_right_click_cid = self.spike_ax.figure.canvas.mpl_connect(
+                'button_press_event', 
+                self.on_spike_ax_right_click
             )
             
             # 添加双击事件监听 - 安全地断开可能的旧连接
@@ -686,7 +710,7 @@ class ManualSpikeSelector(QWidget):
                 self.on_manual_span_select,
                 'horizontal',
                 useblit=True,
-                props=dict(alpha=0.3, facecolor='blue'),
+                props=dict(alpha=0.05, facecolor='blue', zorder=0),  # alpha降到0.05，zorder=0让其在数据下面
                 interactive=True,
                 drag_from_anywhere=True
             )
@@ -789,6 +813,46 @@ class ManualSpikeSelector(QWidget):
                 saved_xlim = self.zoomed_ax.get_xlim()
                 saved_ylim = self.zoomed_ax.get_ylim()
             
+            # 在zoomed_ax上绘制选择区域的蓝色高亮
+            # 关键修复：必须先清除所有旧的临时选择高亮（蓝色）
+            # 但保留已保存spikes的浅绿色高亮
+            
+            # 收集所有需要移除的集合 (collections)
+            collections_to_remove = []
+            for collection in list(self.zoomed_ax.collections):  # 使用list()创建副本
+                # 移除临时选择区域，保留已保存的spike高亮
+                if hasattr(collection, '_is_selection'):
+                    collections_to_remove.append(collection)
+            
+            # 收集所有需要移除的补丁 (patches) - axvspan创建的是Polygon，属于Patch
+            patches_to_remove = []
+            for patch in list(self.zoomed_ax.patches):
+                if hasattr(patch, '_is_selection'):
+                    patches_to_remove.append(patch)
+            
+            # 移除收集到的集合
+            for collection in collections_to_remove:
+                try:
+                    collection.remove()
+                except ValueError:
+                    pass
+            
+            # 移除收集到的补丁
+            for patch in patches_to_remove:
+                try:
+                    patch.remove()
+                except ValueError:
+                    pass
+            
+            # 添加新的临时选择高亮区域（蓝色）
+            span = self.zoomed_ax.axvspan(
+                xmin, xmax,
+                alpha=0.05,  # 调得很浅，从0.3改为0.05
+                color='blue',
+                zorder=0  # 放在数据线下面
+            )
+            span._is_selection = True  # 标记为临时选择
+            
             # 计算选择区域的持续时间
             duration_ms = (xmax - xmin) * 1000
             
@@ -887,7 +951,7 @@ class ManualSpikeSelector(QWidget):
                     pass
             
             # 添加新的临时选择高亮区域（蓝色）
-            span = self.zoomed_ax.axvspan(xmin, xmax, alpha=0.3, color='blue')
+            span = self.zoomed_ax.axvspan(xmin, xmax, alpha=0.05, color='blue', zorder=0)  # 调浅从0.3改为0.05
             span._is_selection = True  # 标记为临时选择
             
             # ==================== 清除旧的峰值标记 ====================
@@ -919,7 +983,7 @@ class ManualSpikeSelector(QWidget):
                 self.zoomed_ax.set_ylim(saved_ylim)
                 
                 # 强制立即重绘canvas以确保高亮区域正确显示
-                # 这对于清除旧的高亮区域非常重要
+        # 这对于清除旧的高亮区域非常重要
                 if hasattr(self, 'plot_canvas') and self.plot_canvas is not None:
                     # 使用draw()而不是draw_idle()以确保立即刷新
                     self.plot_canvas.draw()
@@ -1181,10 +1245,25 @@ class ManualSpikeSelector(QWidget):
                     self.spike_ax.axvspan(
                         highlight_start,
                         highlight_end,
-                        alpha=0.3, 
-                        color='red'
+                        alpha=0.05,  # 调浅，从0.3改为0.05
+                        color='red',
+                        zorder=0  # 放在数据下面
                     )
             
+            # 不在trace_ax上绘制蓝色highlight（用户不需要）
+            # 只保留绿色的当前窗口位置标记（在update_manual_plot中绘制）
+            
+            # 设置鼠标悬停时的光标样式提示可点击
+            def on_hover(event):
+                if event.inaxes == self.trace_ax:
+                    event.canvas.setCursor(Qt.CursorShape.PointingHandCursor)
+                else:
+                    event.canvas.setCursor(Qt.CursorShape.ArrowCursor)
+            
+            # 断开旧的hover连接（如果存在）
+            if hasattr(self, '_hover_cid'):
+                self.manual_fig.canvas.mpl_disconnect(self._hover_cid)
+            self._hover_cid = self.manual_fig.canvas.mpl_connect('motion_notify_event', on_hover)
             # 标记当前选择的峰值位置（用红色标记当前选择的峰值）
             if peak_idx is not None and peak_idx < len(data):
                 if min(selection_time) <= peak_time <= max(selection_time):
@@ -1218,8 +1297,33 @@ class ManualSpikeSelector(QWidget):
         except Exception as e:
             import traceback
             print(f"Error updating peak display: {e}")
-            print(traceback.format_exc())
-
+            traceback.print_exc()
+    
+    def on_spike_ax_right_click(self, event):
+        """处理subplot3上的右键点击事件 - 右键点击选中区域即可保存"""
+        # 只处理右键点击
+        if event.button != 3:  # 3是右键
+            return
+        
+        # 检查是否点击在spike_ax上
+        if event.inaxes != self.spike_ax:
+            return
+        
+        # 检查是否有当前选中的数据
+        if not hasattr(self, 'current_manual_spike_data') or not self.current_manual_spike_data:
+            return
+        
+        # 检查是否有最终选择的区域
+        final_start = self.current_manual_spike_data.get('final_start_time')
+        final_end = self.current_manual_spike_data.get('final_end_time')
+        
+        if final_start is None or final_end is None:
+            return
+        
+        # 检查右键点击位置是否在选中区域内
+        if event.xdata is not None and final_start <= event.xdata <= final_end:
+            # 在选中区域内右键点击，自动保存spike
+            self.add_manual_peak()
     
     def add_manual_peak(self):
         """添加手动标记的峰值"""
@@ -1963,10 +2067,10 @@ class SpikesListWindow(QDialog):
         header_layout.addWidget(self.title_label)
         
         header_layout.addStretch()
-        
-        self.count_label = QLabel("No spikes")
-        self.count_label.setStyleSheet("font-size: 12px; color: gray;")
-        header_layout.addWidget(self.count_label)
+        # Manual峰值数量显示标签
+        self.peak_count_label = QLabel("Manual peaks: 0")
+        self.peak_count_label.setStyleSheet("font-size: 11px; color: #555;")
+        header_layout.addWidget(self.peak_count_label)
         
         # Statistics 按钮
         self.statistics_btn = QPushButton("Statistics")
@@ -2049,11 +2153,13 @@ class SpikesListWindow(QDialog):
             # 获取父窗口的spikes数据
             manual_spikes = self.parent_selector.manual_spikes
             
-            # 更新计数标签
-            if len(manual_spikes) > 0:
-                self.count_label.setText(f"Total: {len(manual_spikes)} spike(s)")
-            else:
-                self.count_label.setText("No spikes")
+            # 更新计数标签 - 使用正确的属性名
+            count_label = self.peak_count_label if hasattr(self, 'peak_count_label') else None
+            if count_label:
+                if len(manual_spikes) > 0:
+                    count_label.setText(f"Manual peaks: {len(manual_spikes)}")
+                else:
+                    count_label.setText("Manual peaks: 0")
             
             # 获取当前行数
             current_rows = self.spikes_table.rowCount()
@@ -2366,7 +2472,7 @@ class GroupStatisticsWindow(QDialog):
         # Bin number 控件
         btn_layout.addWidget(QLabel("Bins:"))
         self.bin_spinbox = QSpinBox()
-        self.bin_spinbox.setRange(5, 50)
+        self.bin_spinbox.setRange(5, 500)
         self.bin_spinbox.setValue(15)
         self.bin_spinbox.setFixedWidth(60)
         self.bin_spinbox.valueChanged.connect(self.update_plot)
@@ -2526,7 +2632,7 @@ class GroupManagerDialog(QDialog):
     def __init__(self, current_groups, parent=None):
         super().__init__(parent)
         self.setWindowTitle("Manage Groups")
-        self.setFixedSize(300, 400)
+        self.setFixedSize(350, 450)
         self.groups = list(current_groups)
         
         layout = QVBoxLayout(self)
@@ -2534,6 +2640,7 @@ class GroupManagerDialog(QDialog):
         # 组列表
         self.list_widget = QListWidget()
         self.list_widget.addItems(self.groups)
+        self.list_widget.itemDoubleClicked.connect(self.rename_group_item)
         layout.addWidget(self.list_widget)
         
         # 添加组
@@ -2546,10 +2653,20 @@ class GroupManagerDialog(QDialog):
         add_layout.addWidget(add_btn)
         layout.addLayout(add_layout)
         
+        # 按钮布局
+        btn_layout = QHBoxLayout()
+        
+        # 重命名按钮
+        rename_btn = QPushButton("Rename Selected")
+        rename_btn.clicked.connect(self.rename_group)
+        btn_layout.addWidget(rename_btn)
+        
         # 删除组
         del_btn = QPushButton("Delete Selected")
         del_btn.clicked.connect(self.delete_group)
-        layout.addWidget(del_btn)
+        btn_layout.addWidget(del_btn)
+        
+        layout.addLayout(btn_layout)
         
         # 确认按钮
         button_box = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
@@ -2563,14 +2680,45 @@ class GroupManagerDialog(QDialog):
             self.groups.append(name)
             self.list_widget.addItem(name)
             self.new_group_input.clear()
+    
+    def rename_group(self):
+        """通过按钮重命名选中的组"""
+        current_row = self.list_widget.currentRow()
+        if current_row >= 0:
+            self.rename_group_item(self.list_widget.item(current_row))
+    
+    def rename_group_item(self, item):
+        """重命名组（支持双击和按钮）"""
+        if item is None:
+            return
+        
+        old_name = item.text()
+        new_name, ok = QLineEdit().text(), False
+        
+        # 创建输入对话框
+        from PyQt6.QtWidgets import QInputDialog
+        new_name, ok = QInputDialog.getText(
+            self,
+            "Rename Group",
+            f"Enter new name for '{old_name}':",
+            QLineEdit.EchoMode.Normal,
+            old_name
+        )
+        
+        if ok and new_name.strip():
+            new_name = new_name.strip()
+            if new_name != old_name and new_name not in self.groups:
+                # 更新列表
+                row = self.groups.index(old_name)
+                self.groups[row] = new_name
+                item.setText(new_name)
+            elif new_name in self.groups and new_name != old_name:
+                QMessageBox.warning(self, "Warning", f"Group '{new_name}' already exists")
             
     def delete_group(self):
         current_row = self.list_widget.currentRow()
         if current_row >= 0:
-            item = self.list_widget.item(current_row)
-            if item.text() == "Default":
-                QMessageBox.warning(self, "Warning", "Cannot delete Default group")
-                return
+            # 移除了Default组的保护，现在可以删除任何组
             self.groups.pop(current_row)
             self.list_widget.takeItem(current_row)
             

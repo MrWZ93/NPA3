@@ -1462,7 +1462,7 @@ class ManualSpikeSelector(QWidget):
             self.update_spikes_table()
 
     def export_manual_peaks(self):
-        """将峰值数据导出到文件（信息和原始波形数据）"""
+        """将峰值数据导出到文件夹（包含统计数据、波形数据和图表）"""
         if not self.manual_spikes:
             QMessageBox.warning(self, "Warning", "No peaks to export")
             return
@@ -1473,23 +1473,36 @@ class ManualSpikeSelector(QWidget):
             if hasattr(self.plot_canvas, 'file_path') and self.plot_canvas.file_path:
                 default_dir = os.path.dirname(self.plot_canvas.file_path)
         
-        # 让用户选择保存位置
-        file_path, _ = QFileDialog.getSaveFileName(
+        # 让用户选择保存文件夹
+        folder_path = QFileDialog.getExistingDirectory(
             self,
-            "Export Peaks Data",
-            os.path.join(default_dir, "peaks_export.csv") if default_dir else "peaks_export.csv",
-            "CSV Files (*.csv);;All Files (*)"
+            "Select Export Folder",
+            default_dir if default_dir else "",
+            QFileDialog.Option.ShowDirsOnly
         )
         
-        if not file_path:
+        if not folder_path:
             return
             
         try:
             import csv
             import os
-            base_path = os.path.splitext(file_path)[0]
             
-            # 1. 导出Spike信息到CSV
+            # 创建导出文件夹（peaks_export_TIMESTAMP）
+            from datetime import datetime
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            export_folder = os.path.join(folder_path, f"peaks_export_{timestamp}")
+            os.makedirs(export_folder, exist_ok=True)
+            
+            # 创建子文件夹
+            plots_folder = os.path.join(export_folder, "spike_plots")
+            os.makedirs(plots_folder, exist_ok=True)
+            
+            statistics_folder = os.path.join(export_folder, "statistics_plots")
+            os.makedirs(statistics_folder, exist_ok=True)
+            
+            # 1. 导出Spike统计信息到CSV
+            stats_file = os.path.join(export_folder, "peaks_statistics.csv")
             headers = ['ID', 'Time (s)', 'Amplitude (nA)', 'Duration (ms)', 'Start Time', 'End Time', 'Group']
             data = []
             
@@ -1505,49 +1518,60 @@ class ManualSpikeSelector(QWidget):
                 ]
                 data.append(row)
                 
-            with open(file_path, 'w', newline='') as f:
+            with open(stats_file, 'w', newline='') as f:
                 writer = csv.writer(f)
                 writer.writerow(headers)
                 writer.writerows(data)
             
-            # 2. 导出每个group的原始波形数据
+            # 2. 按组分组spikes
             grouped_spikes = {}
             if self.plot_canvas and self.plot_canvas.current_channel_data is not None:
-                # 按组分组spikes
                 for spike in self.manual_spikes:
                     group = spike.get('group', 'Default')
                     if group not in grouped_spikes:
                         grouped_spikes[group] = []
                     grouped_spikes[group].append(spike)
                 
-                # 为每个组导出波形数据
+                data_obj = self.plot_canvas.current_channel_data
+                time_axis = self.plot_canvas.time_axis
+                sampling_rate = self.plot_canvas.sampling_rate
+                
+                # 3. 导出每个 group 的 waveform 数据到 CSV
                 for group_name, group_spikes in grouped_spikes.items():
-                    group_file = f"{base_path}_{group_name}_waveforms.csv"
+                    if not group_spikes:
+                        continue
                     
-                    with open(group_file, 'w', newline='') as f:
+                    # 为每个组创建 CSV 文件
+                    group_csv = os.path.join(export_folder, f"{group_name}_waveforms.csv")
+                    
+                    # 准备该组的数据
+                    max_length = 0
+                    spike_waveforms = []
+                    spike_ids = []
+                    
+                    # 收集所有波形数据
+                    for spike in group_spikes:
+                        spike_id = spike.get('id', 'unknown')
+                        start_idx = spike.get('start_idx')
+                        end_idx = spike.get('end_idx')
+                        
+                        if start_idx is not None and end_idx is not None:
+                            waveform = data_obj[start_idx:end_idx+1]
+                            spike_waveforms.append(waveform)
+                            spike_ids.append(spike_id)
+                            max_length = max(max_length, len(waveform))
+                    
+                    # 写入 CSV 文件
+                    with open(group_csv, 'w', newline='') as f:
                         writer = csv.writer(f)
                         
-                        # 写入header
+                        # 写入 header
                         header_row = ['Sample_Index']
-                        for i, spike in enumerate(group_spikes, 1):
-                            spike_id = spike.get('id', i)
-                            header_row.append(f"Spike_{spike_id}")
+                        for spike_id in spike_ids:
+                            header_row.append(f'Spike_{spike_id}')
                         writer.writerow(header_row)
                         
-                        # 获取最长的spike长度以对齐数据
-                        max_length = 0
-                        spike_waveforms = []
-                        for spike in group_spikes:
-                            start_idx = spike.get('start_idx')
-                            end_idx = spike.get('end_idx')
-                            if start_idx is not None and end_idx is not None:
-                                waveform = self.plot_canvas.current_channel_data[start_idx:end_idx+1]
-                                spike_waveforms.append(waveform)
-                                max_length = max(max_length, len(waveform))
-                            else:
-                                spike_waveforms.append([])
-                        
-                        # 按行写入波形数据
+                        # 按行写入数据
                         for sample_idx in range(max_length):
                             row = [sample_idx]
                             for waveform in spike_waveforms:
@@ -1556,11 +1580,123 @@ class ManualSpikeSelector(QWidget):
                                 else:
                                     row.append('')  # 空值填充
                             writer.writerow(row)
+                
+                # 4. 为每个 group 创建 spike_plots 子文件夹并生成图表
+                for spike in self.manual_spikes:
+                    spike_id = spike.get('id', 'unknown')
+                    spike_group = spike.get('group', 'Default')
+                    start_idx = spike.get('start_idx')
+                    end_idx = spike.get('end_idx')
+                    
+                    if start_idx is not None and end_idx is not None:
+                        # 为该 group 创建子文件夹
+                        group_plot_folder = os.path.join(plots_folder, spike_group)
+                        os.makedirs(group_plot_folder, exist_ok=True)
+                        
+                        waveform = data_obj[start_idx:end_idx+1]
+                        spike_time = time_axis[start_idx:end_idx+1] if time_axis is not None else np.arange(len(waveform))
+                        
+                        # 生成单个spike的图表（添加 Group 信息）
+                        fig, ax = plt.subplots(figsize=(8, 4))
+                        ax.plot(spike_time, waveform, linewidth=1.5, color='blue')
+                        ax.set_xlabel('Time (s)')
+                        ax.set_ylabel('Amplitude (nA)')
+                        ax.set_title(f"Spike {spike_id} ({spike_group}) - Amplitude: {spike.get('amplitude', 0):.2f} nA, Duration: {spike.get('duration', 0)*1000:.2f} ms")
+                        ax.grid(True, alpha=0.3)
+                        
+                        spike_plot_path = os.path.join(group_plot_folder, f"spike_{spike_id}.png")
+                        fig.savefig(spike_plot_path, dpi=150, bbox_inches='tight')
+                        plt.close(fig)
+                
+                # 5. 为每个组生成统计图表
+                for group_name, group_spikes in grouped_spikes.items():
+                    if not group_spikes:
+                        continue
+                    
+                    # 创建统计图（overlaid spikes 和 scatter plot）
+                    fig = Figure(figsize=(12, 5))
+                    
+                    # 4.1 绘制 Overlaid Spikes
+                    ax1 = fig.add_subplot(1, 2, 1)
+                    ax1.set_title(f"{group_name} - Overlaid Spikes ({len(group_spikes)} spikes)")
+                    ax1.set_xlabel("Time (ms)")
+                    ax1.set_ylabel("Amplitude (nA)")
+                    
+                    for spike in group_spikes:
+                        start_idx = spike.get('start_idx')
+                        end_idx = spike.get('end_idx')
+                        
+                        if start_idx is None or end_idx is None:
+                            continue
+                        
+                        waveform = data_obj[start_idx:end_idx+1]
+                        duration_samples = len(waveform)
+                        time_ms = np.arange(duration_samples) / (sampling_rate / 1000.0) if sampling_rate else np.arange(duration_samples)
+                        
+                        ax1.plot(time_ms, waveform, alpha=0.5, linewidth=0.8)
+                    
+                    ax1.grid(True, alpha=0.3)
+                    
+                    # 4.2 绘制 Scatter Plot with Histograms
+                    from matplotlib.gridspec import GridSpec
+                    
+                    # 提取duration和amplitude数据
+                    durations = []
+                    amplitudes = []
+                    for spike in group_spikes:
+                        dur = spike.get('duration', 0) * 1000  # 转为毫秒
+                        amp = spike.get('amplitude', 0)
+                        durations.append(dur)
+                        amplitudes.append(amp)
+                    
+                    # 创建gridspec布局用于scatter plot
+                    ax2 = fig.add_subplot(1, 2, 2)
+                    pos = ax2.get_position()
+                    ax2.remove()
+                    
+                    gs = GridSpec(3, 3, 
+                                 left=pos.x0, right=pos.x0 + pos.width,
+                                 bottom=pos.y0, top=pos.y0 + pos.height,
+                                 height_ratios=[0.2, 0.02, 1],
+                                 width_ratios=[1, 0.02, 0.2],
+                                 hspace=0, wspace=0,
+                                 figure=fig)
+                    
+                    # 散点图
+                    ax_scatter = fig.add_subplot(gs[2, 0])
+                    ax_scatter.scatter(durations, amplitudes, alpha=0.6, s=30, edgecolors='black', linewidth=0.5)
+                    ax_scatter.set_xlabel("Duration (ms)")
+                    ax_scatter.set_ylabel("Amplitude (nA)")
+                    ax_scatter.set_title(f"{group_name} - Duration vs Amplitude")
+                    ax_scatter.grid(True, alpha=0.3)
+                    
+                    # 上方直方图
+                    ax_top = fig.add_subplot(gs[0, 0], sharex=ax_scatter)
+                    ax_top.hist(durations, bins=15, alpha=0.7, edgecolor='black')
+                    ax_top.set_ylabel("Count", fontsize=9)
+                    ax_top.tick_params(axis='x', labelbottom=False)
+                    ax_top.tick_params(axis='y', labelsize=8)
+                    
+                    # 右方直方图
+                    ax_right = fig.add_subplot(gs[2, 2], sharey=ax_scatter)
+                    ax_right.hist(amplitudes, bins=15, orientation='horizontal', alpha=0.7, edgecolor='black')
+                    ax_right.set_xlabel("Count", fontsize=9)
+                    ax_right.tick_params(axis='y', labelleft=False)
+                    ax_right.tick_params(axis='x', labelsize=8)
+                    
+                    fig.subplots_adjust(left=0.08, right=0.95, top=0.92, bottom=0.1, wspace=0.35)
+                    
+                    # 保存统计图
+                    stats_plot_path = os.path.join(statistics_folder, f"{group_name}_statistics.png")
+                    fig.savefig(stats_plot_path, dpi=150, bbox_inches='tight')
+                    plt.close(fig)
             
             # Success message
-            msg = f"Exported {len(data)} peaks to:\n- Info: {os.path.basename(file_path)}"
-            if grouped_spikes:
-                msg += f"\n- Waveforms: {len(grouped_spikes)} group file(s)"
+            msg = f"Successfully exported {len(data)} peaks to:\n{export_folder}\n\n"
+            msg += f"- Statistics: peaks_statistics.csv\n"
+            msg += f"- Waveforms: {len(grouped_spikes)} CSV files (one per group)\n"
+            msg += f"- Individual spike plots: {len(self.manual_spikes)} PNG files (organized by group)\n"
+            msg += f"- Group statistics plots: {len(grouped_spikes)} PNG files"
             
             QMessageBox.information(
                 self,
@@ -1571,12 +1707,12 @@ class ManualSpikeSelector(QWidget):
             # 更新状态
             if hasattr(self, 'parent') and hasattr(self.parent(), 'status_bar'):
                 self.parent().status_bar.showMessage(
-                    f"Exported {len(data)} peaks to file: {os.path.basename(file_path)}"
+                    f"Exported {len(data)} peaks to folder: {os.path.basename(export_folder)}"
                 )
             
         except Exception as e:
             import traceback
-            print(f"Error exporting peaks to file: {e}")
+            print(f"Error exporting peaks to folder: {e}")
             print(traceback.format_exc())
             QMessageBox.critical(
                 self,

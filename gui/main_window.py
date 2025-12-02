@@ -1033,14 +1033,20 @@ class FileExplorerApp(QMainWindow):
         # 导入峰值检测器组件
         from gui.components.spikes_detector import SpikesDetectorDialog
         
-        # 创建峰值检测器对话框
-        dialog = SpikesDetectorDialog(self)
-        
-        # 设置数据和采样率
-        dialog.set_data(self.visualizer.data, self.visualizer.sampling_rate)
-        
-        # 显示对话框
-        dialog.exec()
+        # 如果对话框已存在，则显示并激活它
+        if hasattr(self, 'spikes_detector_dialog') and self.spikes_detector_dialog is not None:
+            self.spikes_detector_dialog.show()
+            self.spikes_detector_dialog.raise_()
+            self.spikes_detector_dialog.activateWindow()
+        else:
+            # 创建新的峰值检测器对话框
+            self.spikes_detector_dialog = SpikesDetectorDialog(self)
+            
+            # 设置数据和采样率
+            self.spikes_detector_dialog.set_data(self.visualizer.data, self.visualizer.sampling_rate)
+            
+            # 显示为非模态对话框（允许与其他窗口交互）
+            self.spikes_detector_dialog.show()
     
     def open_histogram(self):
         """打开直方图分析工具"""

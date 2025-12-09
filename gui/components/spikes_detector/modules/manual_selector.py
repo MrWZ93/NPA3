@@ -324,9 +324,21 @@ class ManualSpikeSelector(QWidget):
             import traceback
             traceback.print_exc()
     
+    
+    def _find_detector_dialog(self):
+        """找到顶级的 SpikesDetectorDialog"""
+        dialog_parent = self.parent()
+        while dialog_parent is not None:
+            if hasattr(dialog_parent, 'segmentation_enabled') and hasattr(dialog_parent, 'segment_manager'):
+                return dialog_parent
+            dialog_parent = dialog_parent.parent() if hasattr(dialog_parent, 'parent') else None
+        return self  # 如果找不到，返回 self
+    
     def manage_groups(self):
         """打开组管理对话框"""
-        dialog = GroupManagerDialog(self.spike_groups, self)
+        # 使用顶级对话框作为 parent
+        parent_dialog = self._find_detector_dialog()
+        dialog = GroupManagerDialog(self.spike_groups, parent_dialog)
         if dialog.exec():
             # 更新组列表
             self.spike_groups = dialog.get_groups()
@@ -868,7 +880,9 @@ class ManualSpikeSelector(QWidget):
             # 获取选中区域的数据
             selection_data = data[start_idx:end_idx+1]
             
-            # 计算基线校正值
+            # 计算基线校正值（左右两边点的平均值）
+            # 当baseline correction启用时，使用左侧窗口数据
+            # 当未启用时，使用选区左右边界点的平均值作为baseline
             baseline_value = 0
             if self.baseline_correction_check.isChecked():
                 baseline_window = self.baseline_window_spin.value()
@@ -877,6 +891,11 @@ class ManualSpikeSelector(QWidget):
                 
                 if len(baseline_data) > 0:
                     baseline_value = np.mean(baseline_data)
+            else:
+                # 计算左右边界点的平均值作为baseline
+                left_value = data[start_idx] if start_idx < len(data) else 0
+                right_value = data[min(end_idx, len(data)-1)] if end_idx < len(data) else 0
+                baseline_value = (left_value + right_value) / 2.0
             
             # 根据振幅模式计算峰值振幅
             amp_mode = self.amplitude_mode_combo.currentText()
@@ -899,11 +918,16 @@ class ManualSpikeSelector(QWidget):
                 amplitude = np.median(selection_data) - baseline_value
                 peak_idx = start_idx + len(selection_data) // 2
             
+            # 计算归一化振幅 (amplitude / baseline * 100%)
+            normalized_amplitude = (amplitude / baseline_value * 100.0) if baseline_value != 0 else 0
+            
             # 保存当前峰值数据
             self.current_manual_spike_data = {
                 'index': peak_idx,
                 'time': time_axis[peak_idx],
                 'amplitude': amplitude,
+                'baseline': baseline_value,
+                'normalized_amplitude': normalized_amplitude,
                 'start_idx': start_idx,
                 'end_idx': end_idx,
                 'start_time': xmin,
@@ -1059,7 +1083,7 @@ class ManualSpikeSelector(QWidget):
             # 获取选中区域的数据
             selection_data = data[start_idx:end_idx+1]
             
-            # 计算基线校正值
+            # 计算基线校正值（左右两边点的平均值）
             baseline_value = 0
             if self.baseline_correction_check.isChecked():
                 baseline_window = self.baseline_window_spin.value()
@@ -1068,6 +1092,11 @@ class ManualSpikeSelector(QWidget):
                 
                 if len(baseline_data) > 0:
                     baseline_value = np.mean(baseline_data)
+            else:
+                # 计算左右边界点的平均值作为baseline
+                left_value = data[start_idx] if start_idx < len(data) else 0
+                right_value = data[min(end_idx, len(data)-1)] if end_idx < len(data) else 0
+                baseline_value = (left_value + right_value) / 2.0
             
             # 根据振幅模式计算峰值振幅
             amp_mode = self.amplitude_mode_combo.currentText()
@@ -1082,6 +1111,7 @@ class ManualSpikeSelector(QWidget):
                     # 使用原始峰值数据
                     peak_idx = self.current_manual_spike_data.get('index')
                     amplitude = self.current_manual_spike_data.get('amplitude')
+                    baseline_value = self.current_manual_spike_data.get('baseline', 0)
             elif amp_mode == "Minimum":
                 # 找到选区内的最小值（负峰值）
                 if len(selection_data) > 0:
@@ -1092,6 +1122,7 @@ class ManualSpikeSelector(QWidget):
                     # 使用原始峰值数据
                     peak_idx = self.current_manual_spike_data.get('index')
                     amplitude = self.current_manual_spike_data.get('amplitude')
+                    baseline_value = self.current_manual_spike_data.get('baseline', 0)
             elif amp_mode == "Average":
                 # 使用平均值
                 if len(selection_data) > 0:
@@ -1100,6 +1131,7 @@ class ManualSpikeSelector(QWidget):
                 else:
                     peak_idx = self.current_manual_spike_data.get('index')
                     amplitude = self.current_manual_spike_data.get('amplitude')
+                    baseline_value = self.current_manual_spike_data.get('baseline', 0)
             else:  # 中值
                 if len(selection_data) > 0:
                     amplitude = np.median(selection_data) - baseline_value
@@ -1107,6 +1139,10 @@ class ManualSpikeSelector(QWidget):
                 else:
                     peak_idx = self.current_manual_spike_data.get('index')
                     amplitude = self.current_manual_spike_data.get('amplitude')
+                    baseline_value = self.current_manual_spike_data.get('baseline', 0)
+            
+            # 计算归一化振幅 (amplitude / baseline * 100%)
+            normalized_amplitude = (amplitude / baseline_value * 100.0) if baseline_value != 0 else 0
             
             # 计算选择区域的持续时间
             duration_ms = (xmax - xmin) * 1000
@@ -1125,7 +1161,9 @@ class ManualSpikeSelector(QWidget):
                 'final_duration': xmax - xmin,
                 'index': peak_idx,
                 'time': time_axis[peak_idx],
-                'amplitude': amplitude
+                'amplitude': amplitude,
+                'baseline': baseline_value,
+                'normalized_amplitude': normalized_amplitude
             })
             
             # 在第三个子图中显示最终选择的区域
@@ -1285,7 +1323,13 @@ class ManualSpikeSelector(QWidget):
                 )
             
             # 设置显示范围为用户选择的区域
-            self.spike_ax.set_xlim(start_time, end_time)
+            # 添加验证以避免 start_time == end_time 的警告
+            if abs(end_time - start_time) > 1e-9:  # 确保有有效范围
+                self.spike_ax.set_xlim(start_time, end_time)
+            else:
+                # 如果范围太小，使用一个小的默认范围
+                margin = 0.001  # 1ms 的边距
+                self.spike_ax.set_xlim(start_time - margin, end_time + margin)
             
             # 自动调整Y轴范围以显示完整数据
             self.spike_ax.margins(y=0.1)
@@ -1322,8 +1366,51 @@ class ManualSpikeSelector(QWidget):
         
         # 检查右键点击位置是否在选中区域内
         if event.xdata is not None and final_start <= event.xdata <= final_end:
-            # 在选中区域内右键点击，自动保存spike
-            self.add_manual_peak()
+            # 在选中区域内右键点击
+            # 检查有多少个 groups
+            num_groups = len(self.spike_groups)
+            
+            if num_groups == 1:
+                # 只有一个 group，直接添加
+                self.add_manual_peak()
+            else:
+                # 有多个 groups，显示选择菜单
+                menu = QMenu(self)
+                menu.setStyleSheet("""
+                    QMenu {
+                        background-color: white;
+                        border: 1px solid #cccccc;
+                    }
+                    QMenu::item {
+                        padding: 5px 25px 5px 10px;
+                    }
+                    QMenu::item:selected {
+                        background-color: #0078d7;
+                        color: white;
+                    }
+                """)
+                
+                # 为每个 group 添加菜单项
+                for group_name in self.spike_groups:
+                    action = menu.addAction(f"Add to {group_name}")
+                    action.setData(group_name)
+                
+                # 在鼠标位置显示菜单
+                action = menu.exec(self.spike_ax.figure.canvas.mapToGlobal(
+                    self.spike_ax.figure.canvas.mapFromParent(
+                        self.spike_ax.figure.canvas.parentWidget().mapFromGlobal(
+                            self.spike_ax.figure.canvas.cursor().pos()
+                        )
+                    )
+                ))
+                
+                # 如果用户选择了某个 group
+                if action:
+                    selected_group = action.data()
+                    # 设置当前数据的 group
+                    self.current_manual_spike_data['group'] = selected_group
+                    # 添加 spike
+                    self.add_manual_peak()
     
     def add_manual_peak(self):
         """添加手动标记的峰值"""
@@ -1503,7 +1590,7 @@ class ManualSpikeSelector(QWidget):
             
             # 1. 导出Spike统计信息到CSV
             stats_file = os.path.join(export_folder, "peaks_statistics.csv")
-            headers = ['ID', 'Time (s)', 'Amplitude (nA)', 'Duration (ms)', 'Start Time', 'End Time', 'Group']
+            headers = ['ID', 'Time (s)', 'Amplitude (nA)', 'Baseline (nA)', 'Normalized Amplitude (%)', 'Duration (ms)', 'Start Time', 'End Time', 'Group']
             data = []
             
             for spike in self.manual_spikes:
@@ -1511,6 +1598,8 @@ class ManualSpikeSelector(QWidget):
                     spike.get('id', ''),
                     spike.get('time', 0),
                     spike.get('amplitude', 0),
+                    spike.get('baseline', 0),
+                    spike.get('normalized_amplitude', 0),
                     spike.get('duration', 0) * 1000,  # 转为毫秒
                     spike.get('start_time', 0),
                     spike.get('end_time', 0),
@@ -1690,13 +1779,178 @@ class ManualSpikeSelector(QWidget):
                     stats_plot_path = os.path.join(statistics_folder, f"{group_name}_statistics.png")
                     fig.savefig(stats_plot_path, dpi=150, bbox_inches='tight')
                     plt.close(fig)
+                
+                # 6. 生成 Full Trace 图表（subplot1）并标记所有 spikes
+                full_trace_folder = os.path.join(export_folder, "full_trace_plots")
+                os.makedirs(full_trace_folder, exist_ok=True)
+                
+                # 检查是否有 segmentation（向上查找真正的 SpikesDetectorDialog）
+                has_segments = False
+                num_segments = 1
+                segment_manager = None
+                
+                # 向上遍历父对象，找到 SpikesDetectorDialog
+                dialog_parent = self.parent()
+                while dialog_parent is not None:
+                    # 检查是否是 SpikesDetectorDialog（通过检查是否有 segmentation_enabled 属性）
+                    if hasattr(dialog_parent, 'segmentation_enabled') and hasattr(dialog_parent, 'segment_manager'):
+                        print(f"DEBUG: Found SpikesDetectorDialog: {type(dialog_parent)}")
+                        if dialog_parent.segmentation_enabled and dialog_parent.segment_manager is not None:
+                            has_segments = True
+                            num_segments = dialog_parent.segment_manager.num_segments
+                            segment_manager = dialog_parent.segment_manager
+                            print(f"DEBUG: Segmentation enabled with {num_segments} segments")
+                        break
+                    # 继续向上查找
+                    dialog_parent = dialog_parent.parent() if hasattr(dialog_parent, 'parent') else None
+                
+                print(f"DEBUG: has_segments result: {has_segments}")
+                print(f"DEBUG: num_segments: {num_segments}")
+                
+                if has_segments:
+                    # 有 segmentation，只为包含 spikes 的 segments 生成图
+                    print(f"DEBUG: Total segments: {num_segments}")
+                    print(f"DEBUG: Total spikes to export: {len(self.manual_spikes)}")
+                    
+                    # 找出所有包含 spikes 的 segment 索引
+                    segments_with_spikes = set()
+                    for spike in self.manual_spikes:
+                        spike_time = spike.get('time', 0)
+                        print(f"DEBUG: Spike ID {spike.get('id')} at time {spike_time}")
+                        
+                        # 确定这个 spike 属于哪个 segment
+                        for seg_idx in range(num_segments):
+                            seg_info = segment_manager.get_segment_info(seg_idx)
+                            if seg_info is None:
+                                continue
+                            
+                            seg_time_start = seg_info['start_time']
+                            seg_time_end = seg_info['end_time']
+                            
+                            if seg_time_start <= spike_time <= seg_time_end:
+                                segments_with_spikes.add(seg_idx)
+                                print(f"DEBUG: Spike {spike.get('id')} belongs to segment {seg_idx + 1} (time range: {seg_time_start:.3f} - {seg_time_end:.3f})")
+                                break
+                    
+                    print(f"DEBUG: Segments with spikes: {sorted(segments_with_spikes)}")
+                    print(f"DEBUG: Number of segments to export: {len(segments_with_spikes)}")
+                    
+                    # 只为包含 spikes 的 segments 生成图表
+                    for seg_idx in sorted(segments_with_spikes):
+                        print(f"DEBUG: Exporting segment {seg_idx + 1}...")
+                        
+                        # 获取该 segment 的数据和信息
+                        seg_data = segment_manager.get_segment_data(seg_idx)
+                        seg_info = segment_manager.get_segment_info(seg_idx)
+                        
+                        if seg_info is None:
+                            print(f"DEBUG: Warning - could not get info for segment {seg_idx + 1}")
+                            continue
+                        
+                        seg_time_start = seg_info['start_time']
+                        seg_time_end = seg_info['end_time']
+                        
+                        print(f"DEBUG: Segment {seg_idx + 1} data length: {len(seg_data)}, time range: {seg_time_start:.3f} - {seg_time_end:.3f}")
+                        
+                        # 创建时间轴
+                        num_samples = len(seg_data)
+                        seg_time_axis = np.linspace(seg_time_start, seg_time_end, num_samples)
+                        
+                        # 创建图表
+                        fig, ax = plt.subplots(figsize=(12, 4))
+                        ax.plot(seg_time_axis, seg_data, linewidth=0.5, color='blue')
+                        ax.set_xlabel('Time (s)')
+                        ax.set_ylabel('Amplitude (nA)')
+                        ax.set_title(f"Full Trace - Segment {seg_idx + 1}/{num_segments}")
+                        ax.grid(True, alpha=0.3)
+                        
+                        # 统计该 segment 中的 spikes 数量
+                        spikes_in_segment = 0
+                        
+                        # 标记该 segment 中的所有 spikes
+                        for spike in self.manual_spikes:
+                            spike_time = spike.get('time', 0)
+                            spike_id = spike.get('id', '')
+                            
+                            # 检查 spike 是否在当前 segment 的时间范围内
+                            if seg_time_start <= spike_time <= seg_time_end:
+                                spikes_in_segment += 1
+                                # 找到最接近的索引
+                                spike_idx_in_seg = np.abs(seg_time_axis - spike_time).argmin()
+                                spike_amp = seg_data[spike_idx_in_seg]
+                                
+                                print(f"DEBUG:   Marking spike {spike_id} in segment {seg_idx + 1} at time {spike_time:.3f}")
+                                
+                                # 标记 spike 位置
+                                ax.plot(spike_time, spike_amp, 'ro', markersize=8)
+                                
+                                # 添加 spike ID 标签
+                                ax.annotate(f'{spike_id}', 
+                                          xy=(spike_time, spike_amp),
+                                          xytext=(0, 10),
+                                          textcoords='offset points',
+                                          ha='center',
+                                          fontsize=8,
+                                          bbox=dict(boxstyle='round,pad=0.3', facecolor='yellow', alpha=0.7))
+                        
+                        # 在标题中显示该 segment 的 spikes 数量
+                        ax.set_title(f"Full Trace - Segment {seg_idx + 1}/{num_segments} ({spikes_in_segment} spikes)")
+                        
+                        # 保存图表
+                        trace_plot_path = os.path.join(full_trace_folder, f"full_trace_segment_{seg_idx + 1}.png")
+                        print(f"DEBUG: Saving to {trace_plot_path}")
+                        fig.savefig(trace_plot_path, dpi=150, bbox_inches='tight')
+                        plt.close(fig)
+                        print(f"DEBUG: Successfully saved segment {seg_idx + 1}")
+                else:
+                    # 没有 segmentation，生成单个完整图表
+                    fig, ax = plt.subplots(figsize=(14, 4))
+                    ax.plot(time_axis, data_obj, linewidth=0.5, color='blue')
+                    ax.set_xlabel('Time (s)')
+                    ax.set_ylabel('Amplitude (nA)')
+                    ax.set_title("Full Trace - All Identified Spikes")
+                    ax.grid(True, alpha=0.3)
+                    
+                    # 标记所有 spikes
+                    for spike in self.manual_spikes:
+                        spike_idx = spike.get('index')
+                        spike_id = spike.get('id', '')
+                        
+                        if spike_idx is not None and 0 <= spike_idx < len(data_obj):
+                            spike_time = time_axis[spike_idx]
+                            spike_amp = data_obj[spike_idx]
+                            
+                            # 标记 spike 位置
+                            ax.plot(spike_time, spike_amp, 'ro', markersize=8)
+                            
+                            # 添加 spike ID 标签
+                            ax.annotate(f'{spike_id}', 
+                                      xy=(spike_time, spike_amp),
+                                      xytext=(0, 10),
+                                      textcoords='offset points',
+                                      ha='center',
+                                      fontsize=8,
+                                      bbox=dict(boxstyle='round,pad=0.3', facecolor='yellow', alpha=0.7))
+                    
+                    # 保存图表
+                    trace_plot_path = os.path.join(full_trace_folder, "full_trace.png")
+                    fig.savefig(trace_plot_path, dpi=150, bbox_inches='tight')
+                    plt.close(fig)
+            
             
             # Success message
+            # 计算 full trace 图表数量
+            if has_segments:
+                num_trace_plots = len(segments_with_spikes)
+            else:
+                num_trace_plots = 1
+            
             msg = f"Successfully exported {len(data)} peaks to:\n{export_folder}\n\n"
             msg += f"- Statistics: peaks_statistics.csv\n"
             msg += f"- Waveforms: {len(grouped_spikes)} CSV files (one per group)\n"
             msg += f"- Individual spike plots: {len(self.manual_spikes)} PNG files (organized by group)\n"
-            msg += f"- Group statistics plots: {len(grouped_spikes)} PNG files"
+            msg += f"- Group statistics plots: {len(grouped_spikes)} PNG files\n"
+            msg += f"- Full trace plots: {num_trace_plots} PNG file(s) (with spike markers)"
             
             QMessageBox.information(
                 self,
@@ -1881,6 +2135,9 @@ class ManualSpikeSelector(QWidget):
                 # 从列表中移除
                 self.manual_spikes.pop(row)
                 
+                # 重新编号所有 spikes
+                self.renumber_spikes()
+                
                 # 更新表格和绘图
                 self.update_spikes_table()
                 self.update_manual_plot()
@@ -1895,6 +2152,13 @@ class ManualSpikeSelector(QWidget):
             import traceback
             print(f"Error deleting spike: {e}")
             print(traceback.format_exc())
+    
+    def renumber_spikes(self):
+        """重新为所有 spikes 分配连续的 ID"""
+        for i, spike in enumerate(self.manual_spikes):
+            spike['id'] = i + 1
+        # 更新 spike count
+        self.manual_spike_count = len(self.manual_spikes)
     
     def goto_spike(self, row):
         """导航到指定行的spike"""
@@ -2156,8 +2420,9 @@ class ManualSpikeSelector(QWidget):
                 self.spikes_list_window.update_table()
                 return
             
-            # 创建新窗口
-            self.spikes_list_window = SpikesListWindow(parent=self)
+            # 创建新窗口，使用顶级对话框作为 parent
+            parent_dialog = self._find_detector_dialog()
+            self.spikes_list_window = SpikesListWindow(parent=parent_dialog)
             
             # 更新表格内容
             self.spikes_list_window.update_table()
@@ -2185,6 +2450,9 @@ class SpikesListWindow(QDialog):
         self.parent_selector = parent
         self.setWindowTitle("Spikes List")
         self.resize(800, 600)
+        
+        # 设置窗口标志，避免影响主窗口层级
+        self.setWindowFlags(Qt.WindowType.Window)
         
         # 设置UI
         self.setup_ui()
@@ -2258,6 +2526,27 @@ class SpikesListWindow(QDialog):
         
         # 底部按钮
         buttons_layout = QHBoxLayout()
+        
+        # 删除功能按钮
+        self.delete_all_btn = QPushButton("Delete All Spikes")
+        self.delete_all_btn.setStyleSheet("background-color: #f44336; color: white; font-weight: bold;")
+        self.delete_all_btn.clicked.connect(self.delete_all_spikes)
+        buttons_layout.addWidget(self.delete_all_btn)
+        
+        # 按 Group 删除
+        delete_group_layout = QHBoxLayout()
+        delete_group_layout.addWidget(QLabel("Delete by Group:"))
+        self.delete_group_combo = QComboBox()
+        self.delete_group_combo.setMinimumWidth(120)
+        delete_group_layout.addWidget(self.delete_group_combo)
+        
+        self.delete_group_btn = QPushButton("Delete")
+        self.delete_group_btn.setStyleSheet("background-color: #ff9800; color: white; font-weight: bold;")
+        self.delete_group_btn.clicked.connect(self.delete_spikes_by_group)
+        delete_group_layout.addWidget(self.delete_group_btn)
+        
+        buttons_layout.addLayout(delete_group_layout)
+        
         buttons_layout.addStretch()
         
         self.close_button = QPushButton("Close")
@@ -2296,6 +2585,18 @@ class SpikesListWindow(QDialog):
                     count_label.setText(f"Manual peaks: {len(manual_spikes)}")
                 else:
                     count_label.setText("Manual peaks: 0")
+            
+            # 更新 delete group combo box
+            if hasattr(self, 'delete_group_combo'):
+                # 获取所有唯一的 groups
+                groups = set()
+                for spike in manual_spikes:
+                    groups.add(spike.get('group', 'Default'))
+                
+                # 更新 combo box
+                self.delete_group_combo.clear()
+                for group in sorted(groups):
+                    self.delete_group_combo.addItem(group)
             
             # 获取当前行数
             current_rows = self.spikes_table.rowCount()
@@ -2474,14 +2775,113 @@ class SpikesListWindow(QDialog):
                     window.update_plot()  # 更新现有窗口
                     continue
             
+            # 找到顶级对话框作为 parent
+            parent_dialog = self.parent()
+            while parent_dialog is not None:
+                if hasattr(parent_dialog, 'segmentation_enabled') and hasattr(parent_dialog, 'segment_manager'):
+                    break
+                parent_dialog = parent_dialog.parent() if hasattr(parent_dialog, 'parent') else None
+            
             # 创建新窗口
             window = GroupStatisticsWindow(
                 group_name,
                 self.parent_selector,
-                self
+                parent_dialog if parent_dialog else self
             )
             self.parent_selector.statistics_windows[group_name] = window
             window.show()
+    
+    def delete_all_spikes(self):
+        """删除所有 spikes"""
+        if not self.parent_selector or not self.parent_selector.manual_spikes:
+            QMessageBox.information(self, "No Spikes", "No spikes to delete.")
+            return
+        
+        # 确认对话框
+        reply = QMessageBox.question(
+            self,
+            "Confirm Delete All",
+            f"Are you sure you want to delete all {len(self.parent_selector.manual_spikes)} spikes?\n\nThis action cannot be undone.",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No
+        )
+        
+        if reply == QMessageBox.StandardButton.Yes:
+            # 清除所有 spikes
+            self.parent_selector.manual_spikes.clear()
+            self.parent_selector.manual_spike_count = 0
+            
+            # 更新主窗口的显示
+            if hasattr(self.parent_selector, 'peak_count_label'):
+                self.parent_selector.peak_count_label.setText("No manual peaks")
+            
+            # 更新绘图
+            if hasattr(self.parent_selector, 'update_manual_plot'):
+                self.parent_selector.update_manual_plot()
+            
+            # 更新本窗口的表格
+            self.update_table()
+            
+            QMessageBox.information(self, "Success", "All spikes have been deleted.")
+    
+    def delete_spikes_by_group(self):
+        """按 Group 删除 spikes"""
+        if not self.parent_selector or not self.parent_selector.manual_spikes:
+            QMessageBox.information(self, "No Spikes", "No spikes to delete.")
+            return
+        
+        # 获取选中的 group
+        if not hasattr(self, 'delete_group_combo') or self.delete_group_combo.count() == 0:
+            QMessageBox.information(self, "No Groups", "No groups available.")
+            return
+        
+        selected_group = self.delete_group_combo.currentText()
+        
+        # 统计该 group 中的 spikes 数量
+        spikes_in_group = [s for s in self.parent_selector.manual_spikes if s.get('group', 'Default') == selected_group]
+        
+        if not spikes_in_group:
+            QMessageBox.information(self, "No Spikes", f"No spikes in group '{selected_group}'.")
+            return
+        
+        # 确认对话框
+        reply = QMessageBox.question(
+            self,
+            "Confirm Delete by Group",
+            f"Are you sure you want to delete {len(spikes_in_group)} spikes in group '{selected_group}'?\n\nThis action cannot be undone.",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No
+        )
+        
+        if reply == QMessageBox.StandardButton.Yes:
+            # 删除该 group 的所有 spikes
+            self.parent_selector.manual_spikes = [
+                s for s in self.parent_selector.manual_spikes 
+                if s.get('group', 'Default') != selected_group
+            ]
+            
+            # 重新编号所有 spikes
+            if hasattr(self.parent_selector, 'renumber_spikes'):
+                self.parent_selector.renumber_spikes()
+            else:
+                # 如果没有 renumber_spikes 方法，手动更新 count
+                self.parent_selector.manual_spike_count = len(self.parent_selector.manual_spikes)
+            
+            # 更新主窗口的显示
+            if hasattr(self.parent_selector, 'peak_count_label'):
+                if self.parent_selector.manual_spike_count > 0:
+                    self.parent_selector.peak_count_label.setText(f"Manual peaks: {self.parent_selector.manual_spike_count}")
+                else:
+                    self.parent_selector.peak_count_label.setText("No manual peaks")
+            
+            # 更新绘图
+            if hasattr(self.parent_selector, 'update_manual_plot'):
+                self.parent_selector.update_manual_plot()
+            
+            # 更新本窗口的表格
+            self.update_table()
+            
+            QMessageBox.information(self, "Success", f"Deleted {len(spikes_in_group)} spikes from group '{selected_group}'.")
     
     def closeEvent(self, event):
         """处理窗口关闭事件"""
@@ -2584,6 +2984,9 @@ class GroupStatisticsWindow(QDialog):
         
         self.setWindowTitle(f"Statistics - {group_name}")
         self.resize(1000, 500)
+        
+        # 设置窗口标志，避免影响主窗口层级
+        self.setWindowFlags(Qt.WindowType.Window)
         
         self.setup_ui()
         self.connect_signals()
@@ -2770,6 +3173,9 @@ class GroupManagerDialog(QDialog):
         self.setWindowTitle("Manage Groups")
         self.setFixedSize(350, 450)
         self.groups = list(current_groups)
+        
+        # 设置窗口标志，避免影响主窗口层级
+        self.setWindowFlags(Qt.WindowType.Window)
         
         layout = QVBoxLayout(self)
         

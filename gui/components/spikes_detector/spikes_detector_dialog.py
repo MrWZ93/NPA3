@@ -40,6 +40,11 @@ class SpikesDetectorDialog(QDialog):
         self.setWindowTitle("Spikes Detector")
         self.resize(1000, 700)  # 设置初始大小
         
+        # 设置窗口标志，保持窗口在合理的层级
+        # Qt.WindowType.Window 让它成为独立窗口
+        # 不使用 StaysOnTopHint，避免总是置顶
+        self.setWindowFlags(Qt.WindowType.Window)
+        
         # 初始化数据
         self.data = None
         self.sampling_rate = 1000.0  # 默认采样率
@@ -710,6 +715,29 @@ class SpikesDetectorDialog(QDialog):
     
     def set_data(self, data, sampling_rate=None):
         """设置数据（外部调用）"""
+        # 如果有手动标记的 spikes，询问用户是否要清除
+        if hasattr(self, 'manual_selector') and self.manual_selector is not None:
+            if hasattr(self.manual_selector, 'manual_spikes') and len(self.manual_selector.manual_spikes) > 0:
+                from PyQt6.QtWidgets import QMessageBox
+                reply = QMessageBox.question(
+                    self,
+                    "Clear Previous Spikes?",
+                    f"You have {len(self.manual_selector.manual_spikes)} manually marked spikes from the previous data.\n\nDo you want to clear them and start fresh with the new data?",
+                    QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                    QMessageBox.StandardButton.Yes
+                )
+                
+                if reply == QMessageBox.StandardButton.Yes:
+                    # 清空 manual spikes
+                    self.manual_selector.manual_spikes.clear()
+                    self.manual_selector.manual_spike_count = 0
+                    if hasattr(self.manual_selector, 'peak_count_label'):
+                        self.manual_selector.peak_count_label.setText("No manual peaks")
+                    if hasattr(self.manual_selector, 'update_manual_plot'):
+                        self.manual_selector.update_manual_plot()
+                    if hasattr(self.manual_selector, 'update_spikes_table'):
+                        self.manual_selector.update_spikes_table()
+        
         self.data = data
         if sampling_rate is not None:
             self.sampling_rate = sampling_rate
@@ -1094,6 +1122,48 @@ class SpikesDetectorDialog(QDialog):
     def closeEvent(self, event):
         """处理窗口关闭事件"""
         try:
+            # 询问用户是否要清除数据
+            should_clear = False
+            if hasattr(self, 'manual_selector') and self.manual_selector is not None:
+                if hasattr(self.manual_selector, 'manual_spikes') and len(self.manual_selector.manual_spikes) > 0:
+                    from PyQt6.QtWidgets import QMessageBox
+                    reply = QMessageBox.question(
+                        self,
+                        "Clear Data on Close?",
+                        f"You have {len(self.manual_selector.manual_spikes)} manually marked spikes.\n\nDo you want to clear them when closing this window?\n(Click 'No' to keep them for next time)",
+                        QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                        QMessageBox.StandardButton.No  # 默认不清除
+                    )
+                    
+                    if reply == QMessageBox.StandardButton.Yes:
+                        should_clear = True
+            
+            # 关闭所有子窗口
+            if hasattr(self, 'manual_selector') and self.manual_selector is not None:
+                # 关闭 List 窗口
+                if hasattr(self.manual_selector, 'spikes_list_window') and self.manual_selector.spikes_list_window is not None:
+                    self.manual_selector.spikes_list_window.close()
+                    self.manual_selector.spikes_list_window = None
+                
+                # 关闭所有 Statistics 窗口
+                if hasattr(self.manual_selector, 'statistics_windows'):
+                    for window in list(self.manual_selector.statistics_windows.values()):
+                        if window is not None:
+                            window.close()
+                    self.manual_selector.statistics_windows.clear()
+                
+                # 关闭 Group Manager 窗口
+                if hasattr(self.manual_selector, 'group_manager_dialog') and self.manual_selector.group_manager_dialog is not None:
+                    self.manual_selector.group_manager_dialog.close()
+                    self.manual_selector.group_manager_dialog = None
+                
+                # 如果用户选择清除数据
+                if should_clear:
+                    self.manual_selector.manual_spikes.clear()
+                    self.manual_selector.manual_spike_count = 0
+                    if hasattr(self.manual_selector, 'peak_count_label'):
+                        self.manual_selector.peak_count_label.setText("No manual peaks")
+            
             # 确保自动检测器中的线程被终止
             if hasattr(self, 'auto_detector'):
                 # 终止检测线程

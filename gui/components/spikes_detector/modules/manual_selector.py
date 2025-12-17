@@ -901,10 +901,10 @@ class ManualSpikeSelector(QWidget):
             amp_mode = self.amplitude_mode_combo.currentText()
             
             if amp_mode == "Maximum":
-                # 找到选区内的最大绝对值
-                abs_max_idx = np.argmax(np.abs(selection_data))
-                peak_idx = start_idx + abs_max_idx
-                amplitude = selection_data[abs_max_idx] - baseline_value
+                # 找到选区内的最大值（正峰值）
+                max_idx = np.argmax(selection_data)
+                peak_idx = start_idx + max_idx
+                amplitude = selection_data[max_idx] - baseline_value
             elif amp_mode == "Minimum":
                 # 找到选区内的最小值（负峰值）
                 min_idx = np.argmin(selection_data)
@@ -1102,11 +1102,11 @@ class ManualSpikeSelector(QWidget):
             amp_mode = self.amplitude_mode_combo.currentText()
             
             if amp_mode == "Maximum":
-                # 找到选区内的最大绝对值
+                # 找到选区内的最大值（正峰值）
                 if len(selection_data) > 0:
-                    abs_max_idx = np.argmax(np.abs(selection_data))
-                    peak_idx = start_idx + abs_max_idx
-                    amplitude = selection_data[abs_max_idx] - baseline_value
+                    max_idx = np.argmax(selection_data)
+                    peak_idx = start_idx + max_idx
+                    amplitude = selection_data[max_idx] - baseline_value
                 else:
                     # 使用原始峰值数据
                     peak_idx = self.current_manual_spike_data.get('index')
@@ -1984,15 +1984,8 @@ class ManualSpikeSelector(QWidget):
             current_rows = self.spikes_table.rowCount()
             required_rows = len(self.manual_spikes)
             
-            # 调整行数
-            if current_rows < required_rows:
-                # 添加行
-                for i in range(current_rows, required_rows):
-                    self.spikes_table.insertRow(i)
-            elif current_rows > required_rows:
-                # 删除多余行
-                for i in range(current_rows - 1, required_rows - 1, -1):
-                    self.spikes_table.removeRow(i)
+            # 直接设置正确的行数，这样更可靠
+            self.spikes_table.setRowCount(required_rows)
             
             # 填充或更新表格数据
             for row, spike in enumerate(self.manual_spikes):
@@ -2420,9 +2413,10 @@ class ManualSpikeSelector(QWidget):
                 self.spikes_list_window.update_table()
                 return
             
-            # 创建新窗口，使用顶级对话框作为 parent
+            # 创建新窗口，传递 ManualSpikeSelector (self) 作为 parent_selector
+            # 使用顶级对话框作为 Qt parent 以保持正确的窗口层级
             parent_dialog = self._find_detector_dialog()
-            self.spikes_list_window = SpikesListWindow(parent=parent_dialog)
+            self.spikes_list_window = SpikesListWindow(parent_selector=self, parent=parent_dialog)
             
             # 更新表格内容
             self.spikes_list_window.update_table()
@@ -2445,9 +2439,9 @@ class ManualSpikeSelector(QWidget):
 class SpikesListWindow(QDialog):
     """独立的Spikes列表窗口"""
     
-    def __init__(self, parent=None):
+    def __init__(self, parent_selector=None, parent=None):
         super(SpikesListWindow, self).__init__(parent)
-        self.parent_selector = parent
+        self.parent_selector = parent_selector
         self.setWindowTitle("Spikes List")
         self.resize(800, 600)
         
@@ -2602,15 +2596,8 @@ class SpikesListWindow(QDialog):
             current_rows = self.spikes_table.rowCount()
             required_rows = len(manual_spikes)
             
-            # 调整行数
-            if current_rows < required_rows:
-                # 添加行
-                for i in range(current_rows, required_rows):
-                    self.spikes_table.insertRow(i)
-            elif current_rows > required_rows:
-                # 删除多余行
-                for i in range(current_rows - 1, required_rows - 1, -1):
-                    self.spikes_table.removeRow(i)
+            # 直接设置正确的行数，这样更可靠
+            self.spikes_table.setRowCount(required_rows)
             
             # 填充或更新表格数据
             for row, spike in enumerate(manual_spikes):
@@ -3001,6 +2988,25 @@ class GroupStatisticsWindow(QDialog):
         self.canvas = FigureCanvas(self.figure)
         layout.addWidget(self.canvas)
         
+        # 添加拟合信息显示区域
+        self.fit_info_label = QLabel()
+        self.fit_info_label.setStyleSheet("""
+            QLabel {
+                background-color: #f0f0f0;
+                border: 1px solid #ccc;
+                border-radius: 4px;
+                padding: 8px;
+                font-family: monospace;
+                font-size: 10pt;
+            }
+        """)
+        self.fit_info_label.setWordWrap(True)
+        self.fit_info_label.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop)
+        self.fit_info_label.setMinimumHeight(35)
+        self.fit_info_label.setMaximumHeight(45)
+        self.fit_info_label.setText("Fit statistics will be displayed here when fit curves are enabled.")
+        layout.addWidget(self.fit_info_label)
+        
         # 底部按钮和控件
         btn_layout = QHBoxLayout()
         
@@ -3017,13 +3023,89 @@ class GroupStatisticsWindow(QDialog):
         self.bin_spinbox.valueChanged.connect(self.update_plot)
         btn_layout.addWidget(self.bin_spinbox)
         
+        # Duration Fit 控件
+        btn_layout.addWidget(QLabel("  Duration Fit:"))
+        self.duration_fit_check = QCheckBox("Show")
+        self.duration_fit_check.setChecked(True)
+        self.duration_fit_check.stateChanged.connect(self.update_plot)
+        btn_layout.addWidget(self.duration_fit_check)
+        
+        self.duration_fit_type = QComboBox()
+        self.duration_fit_type.addItems(["Gaussian", "Log-Normal", "Exponential"])
+        self.duration_fit_type.setFixedWidth(100)
+        self.duration_fit_type.currentIndexChanged.connect(self.update_plot)
+        btn_layout.addWidget(self.duration_fit_type)
+        
+        # Amplitude Fit 控件
+        btn_layout.addWidget(QLabel("  Amplitude Fit:"))
+        self.amplitude_fit_check = QCheckBox("Show")
+        self.amplitude_fit_check.setChecked(True)
+        self.amplitude_fit_check.stateChanged.connect(self.update_plot)
+        btn_layout.addWidget(self.amplitude_fit_check)
+        
+        self.amplitude_fit_type = QComboBox()
+        self.amplitude_fit_type.addItems(["Gaussian", "Log-Normal", "Exponential"])
+        self.amplitude_fit_type.setFixedWidth(100)
+        self.amplitude_fit_type.currentIndexChanged.connect(self.update_plot)
+        btn_layout.addWidget(self.amplitude_fit_type)
+        
         btn_layout.addStretch()
+        
+        copy_btn = QPushButton("Copy")
+        copy_btn.setToolTip("Copy plot and fit statistics to clipboard")
+        copy_btn.clicked.connect(self.copy_to_clipboard)
+        btn_layout.addWidget(copy_btn)
         
         close_btn = QPushButton("Close")
         close_btn.clicked.connect(self.close)
         btn_layout.addWidget(close_btn)
         
         layout.addLayout(btn_layout)
+    
+    def copy_to_clipboard(self):
+        """复制图表和拟合信息到剪贴板"""
+        try:
+            from PyQt6.QtWidgets import QApplication
+            from PyQt6.QtGui import QClipboard
+            from io import BytesIO
+            
+            # 获取剪贴板
+            clipboard = QApplication.clipboard()
+            
+            # 保存图表为图像
+            buf = BytesIO()
+            self.figure.savefig(buf, format='png', dpi=150, bbox_inches='tight')
+            buf.seek(0)
+            
+            # 读取图像数据
+            from PyQt6.QtGui import QImage, QPixmap
+            image = QImage()
+            image.loadFromData(buf.getvalue())
+            pixmap = QPixmap.fromImage(image)
+            
+            # 获取拟合统计文本
+            fit_text = self.fit_info_label.text()
+            
+            # 组合文本信息
+            combined_text = f"Statistics - {self.group_name}\n\n{fit_text}"
+            
+            # 设置剪贴板内容（图像 + 文本）
+            from PyQt6.QtCore import QMimeData
+            mime_data = QMimeData()
+            mime_data.setImageData(pixmap)
+            mime_data.setText(combined_text)
+            clipboard.setMimeData(mime_data)
+            
+            # 显示成功消息
+            from PyQt6.QtWidgets import QMessageBox
+            QMessageBox.information(self, "Copy Success", 
+                                   "Plot and fit statistics copied to clipboard!\n\n"
+                                   "You can paste the image into documents or image editors,\n"
+                                   "and the text into text editors.")
+            
+        except Exception as e:
+            from PyQt6.QtWidgets import QMessageBox
+            QMessageBox.warning(self, "Copy Failed", f"Failed to copy to clipboard:\n{str(e)}")
         
     def connect_signals(self):
         """连接信号以实现实时更新"""
@@ -3071,6 +3153,133 @@ class GroupStatisticsWindow(QDialog):
         # 调整布局，增加子图之间的间距
         self.figure.subplots_adjust(left=0.08, right=0.95, top=0.92, bottom=0.1, wspace=0.35)
         self.canvas.draw()
+    
+    def _fit_curve(self, data, bins, fit_type, orientation='vertical'):
+        """
+        计算拟合曲线
+        
+        Parameters:
+        - data: 数据数组
+        - bins: bin的数量
+        - fit_type: 拟合类型 ("Gaussian", "Log-Normal", "Exponential")
+        - orientation: 方向 ('vertical' or 'horizontal')
+        
+        Returns:
+        - (x_values, y_values, params_dict): 拟合曲线的坐标和参数字典
+        """
+        try:
+            from scipy import stats
+            
+            # 过滤掉无效数据
+            data = np.array(data)
+            data = data[np.isfinite(data)]
+            
+            if len(data) < 3:
+                return None, None, None
+            
+            # 计算直方图以获取数据范围和bin宽度
+            counts, bin_edges = np.histogram(data, bins=bins)
+            bin_width = bin_edges[1] - bin_edges[0]
+            
+            # 生成平滑的x值用于绘制曲线
+            x_min, x_max = data.min(), data.max()
+            x_range = x_max - x_min
+            x_smooth = np.linspace(x_min - 0.1 * x_range, x_max + 0.1 * x_range, 200)
+            
+            params_dict = {}
+            
+            # 根据拟合类型计算PDF
+            if fit_type == "Gaussian":
+                mu, std = stats.norm.fit(data)
+                pdf = stats.norm.pdf(x_smooth, mu, std)
+                params_dict = {'mean': mu, 'std': std}
+                
+            elif fit_type == "Log-Normal":
+                # Log-Normal需要正值数据
+                if np.any(data <= 0):
+                    # 如果有非正值，偏移数据
+                    data_shifted = data - data.min() + 0.001
+                    shape, loc, scale = stats.lognorm.fit(data_shifted, floc=0)
+                    pdf = stats.lognorm.pdf(x_smooth - data.min() + 0.001, shape, loc, scale)
+                    params_dict = {'shape': shape, 'loc': loc, 'scale': scale, 'offset': data.min() - 0.001}
+                else:
+                    shape, loc, scale = stats.lognorm.fit(data, floc=0)
+                    pdf = stats.lognorm.pdf(x_smooth, shape, loc, scale)
+                    params_dict = {'shape': shape, 'loc': loc, 'scale': scale}
+                    
+            elif fit_type == "Exponential":
+                # Exponential需要非负数据
+                if np.any(data < 0):
+                    # 偏移到非负
+                    data_shifted = data - data.min()
+                    loc, scale = stats.expon.fit(data_shifted)
+                    pdf = stats.expon.pdf(x_smooth - data.min(), loc, scale)
+                    params_dict = {'loc': loc, 'scale': scale, 'offset': data.min()}
+                else:
+                    loc, scale = stats.expon.fit(data)
+                    pdf = stats.expon.pdf(x_smooth, loc, scale)
+                    params_dict = {'loc': loc, 'scale': scale}
+            else:
+                return None, None, None
+            
+            # 将PDF缩放到直方图的尺度（总计数 × bin宽度）
+            y_smooth = pdf * len(data) * bin_width
+            
+            return x_smooth, y_smooth, params_dict
+            
+        except Exception as e:
+            print(f"Warning: Failed to fit {fit_type} curve: {e}")
+            return None, None, None
+    
+    def _update_fit_info(self, duration_params, amplitude_params):
+        """更新拟合信息显示（横向排列）"""
+        if not hasattr(self, 'fit_info_label'):
+            return
+        
+        duration_text = ""
+        amplitude_text = ""
+        
+        # Duration拟合信息
+        if duration_params is not None:
+            duration_fit_type = self.duration_fit_type.currentText()
+            
+            if duration_fit_type == "Gaussian":
+                params_str = f"Mean={duration_params['mean']:.4f}ms, Std={duration_params['std']:.4f}ms"
+            elif duration_fit_type == "Log-Normal":
+                params_str = f"Shape={duration_params['shape']:.4f}, Scale={duration_params['scale']:.4f}"
+            elif duration_fit_type == "Exponential":
+                params_str = f"Scale={duration_params['scale']:.4f}, Rate={1/duration_params['scale']:.4f}"
+            else:
+                params_str = ""
+            
+            duration_text = f"📊 Duration ({duration_fit_type}): {params_str}"
+        
+        # Amplitude拟合信息
+        if amplitude_params is not None:
+            amplitude_fit_type = self.amplitude_fit_type.currentText()
+            
+            if amplitude_fit_type == "Gaussian":
+                params_str = f"Mean={amplitude_params['mean']:.4f}nA, Std={amplitude_params['std']:.4f}nA"
+            elif amplitude_fit_type == "Log-Normal":
+                params_str = f"Shape={amplitude_params['shape']:.4f}, Scale={amplitude_params['scale']:.4f}"
+            elif amplitude_fit_type == "Exponential":
+                params_str = f"Scale={amplitude_params['scale']:.4f}, Rate={1/amplitude_params['scale']:.4f}"
+            else:
+                params_str = ""
+            
+            amplitude_text = f"📊 Amplitude ({amplitude_fit_type}): {params_str}"
+        
+        # 横向组合显示
+        if duration_text and amplitude_text:
+            display_text = f"{duration_text}    |    {amplitude_text}"
+        elif duration_text:
+            display_text = duration_text
+        elif amplitude_text:
+            display_text = amplitude_text
+        else:
+            display_text = "Fit statistics will be displayed here when fit curves are enabled."
+        
+        self.fit_info_label.setText(display_text)
         
     def plot_overlaid_spikes(self, ax, spikes):
         """绘制叠加的spike波形（时间从0开始）"""
@@ -3158,12 +3367,36 @@ class GroupStatisticsWindow(QDialog):
         ax_top.tick_params(axis='x', labelbottom=False)  # 隐藏x轴标签
         ax_top.tick_params(axis='y', labelsize=8)
         
+        # 收集拟合信息
+        fit_info_parts = []
+        
+        # 添加Duration拟合曲线
+        duration_params = None
+        if hasattr(self, 'duration_fit_check') and self.duration_fit_check.isChecked():
+            fit_type = self.duration_fit_type.currentText()
+            x_fit, y_fit, duration_params = self._fit_curve(durations, bins, fit_type, 'vertical')
+            if x_fit is not None and y_fit is not None:
+                ax_top.plot(x_fit, y_fit, 'r-', linewidth=2, alpha=0.8, label=f'{fit_type} Fit')
+                ax_top.legend(fontsize=8, loc='upper right')
+        
         # 创建右方直方图 (bottom-right, 与散点图y轴对齐)
         ax_right = self.figure.add_subplot(gs[2, 2], sharey=ax_scatter)
         ax_right.hist(amplitudes, bins=bins, orientation='horizontal', alpha=0.7, edgecolor='black')
         ax_right.set_xlabel("Count", fontsize=9)
         ax_right.tick_params(axis='y', labelleft=False)  # 隐藏y轴标签
         ax_right.tick_params(axis='x', labelsize=8)
+        
+        # 添加Amplitude拟合曲线
+        amplitude_params = None
+        if hasattr(self, 'amplitude_fit_check') and self.amplitude_fit_check.isChecked():
+            fit_type = self.amplitude_fit_type.currentText()
+            y_fit, x_fit, amplitude_params = self._fit_curve(amplitudes, bins, fit_type, 'horizontal')
+            if x_fit is not None and y_fit is not None:
+                ax_right.plot(x_fit, y_fit, 'r-', linewidth=2, alpha=0.8, label=f'{fit_type} Fit')
+                ax_right.legend(fontsize=8, loc='upper right')
+        
+        # 更新拟合信息显示
+        self._update_fit_info(duration_params, amplitude_params)
 
 
 class GroupManagerDialog(QDialog):

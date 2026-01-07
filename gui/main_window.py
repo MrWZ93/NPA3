@@ -51,6 +51,10 @@ class FileExplorerApp(QMainWindow):
         # Save splitter sizes
         self.config_manager.update_config('splitter_sizes', self.splitter.sizes())
         
+        # Save right splitter sizes (for Processed Files vs Tabs ratio)
+        if hasattr(self, 'right_splitter'):
+            self.config_manager.update_config('right_splitter_sizes', self.right_splitter.sizes())
+        
         # Save sampling rate
         self.config_manager.update_config('sampling_rate', self.viz_controls_tab.sampling_rate_input.value())
         
@@ -168,10 +172,10 @@ class FileExplorerApp(QMainWindow):
         # 启用分割器手柄能够折叠区域
         self.splitter.setChildrenCollapsible(True)
         
-        # 左侧文件浏览和信息区域
+        # 左侧文件浏览区域 (不再包含标签页)
         self.left_widget = QWidget()
         self.left_widget.setMinimumWidth(200)  # 设置最小宽度
-        self.left_widget.setMaximumWidth(350)  # 设置最大宽度，防止过大
+        self.left_widget.setMaximumWidth(350)  # 设置最大宽度,防止过大
         self.left_layout = QVBoxLayout(self.left_widget)
         
         # 添加文件夹选择区域
@@ -202,7 +206,29 @@ class FileExplorerApp(QMainWindow):
         # 加载当前文件夹内容
         self.load_folder_contents(self.current_folder)
         
-        # 底部标签页
+        # 左侧布局添加组件 - 仅包含文件浏览器
+        self.left_layout.addLayout(self.folder_layout)
+        
+        # 创建文件浏览器标题
+        file_browser_label = QLabel("  File Browser")
+        file_browser_label.setFont(QFont("Arial", 12, QFont.Weight.Bold))
+        file_browser_label.setStyleSheet("color: #0078d7; margin: 8px 0; background-color: #f0f0f0; border-radius: 4px; padding: 4px;")
+        file_browser_label.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+        
+        # 在标签旁边添加图标
+        file_browser_icon = QLabel()
+        icon_pixmap = QIcon.fromTheme("system-file-manager").pixmap(24, 24)
+        file_browser_icon.setPixmap(icon_pixmap)
+        
+        # 创建水平布局来放置图标和标签
+        header_layout = QHBoxLayout()
+        header_layout.addWidget(file_browser_icon)
+        header_layout.addWidget(file_browser_label, 1)  # 1表示拉伸因子
+        
+        self.left_layout.addLayout(header_layout)
+        self.left_layout.addWidget(self.file_list, 1)  # 文件列表占据全部剩余空间
+        
+        # 底部标签页 (将在右侧面板中创建)
         self.tabs = QTabWidget()
         
         # 创建笔记管理器
@@ -240,29 +266,6 @@ class FileExplorerApp(QMainWindow):
         self.tabs.setTabToolTip(2, "Visualization Controls")
         self.tabs.setTabToolTip(3, "Notes")
         
-        # 左侧布局添加组件，调整文件列表和标签页的比例
-        self.left_layout.addLayout(self.folder_layout)
-        
-        # 创建文件浏览器标题
-        file_browser_label = QLabel("  File Browser")
-        file_browser_label.setFont(QFont("Arial", 12, QFont.Weight.Bold))
-        file_browser_label.setStyleSheet("color: #0078d7; margin: 8px 0; background-color: #f0f0f0; border-radius: 4px; padding: 4px;")
-        file_browser_label.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
-        
-        # 在标签旁边添加图标
-        file_browser_icon = QLabel()
-        icon_pixmap = QIcon.fromTheme("system-file-manager").pixmap(24, 24)
-        file_browser_icon.setPixmap(icon_pixmap)
-        
-        # 创建水平布局来放置图标和标签
-        header_layout = QHBoxLayout()
-        header_layout.addWidget(file_browser_icon)
-        header_layout.addWidget(file_browser_label, 1)  # 1表示拉伸因子
-        
-        self.left_layout.addLayout(header_layout)
-        self.left_layout.addWidget(self.file_list, 1)  # 减小文件列表的拉伸因子
-        self.left_layout.addWidget(self.tabs, 2)  # 增加标签页的拉伸因子
-        
         # 中间数据可视化区域
         self.center_widget = QWidget()
         self.center_layout = QVBoxLayout(self.center_widget)
@@ -287,18 +290,41 @@ class FileExplorerApp(QMainWindow):
         self.center_layout.addWidget(self.toolbar)
         self.center_layout.addWidget(self.visualizer, 1)  # 添加拉伸因子，使可视化区域占据全部空间
         
-        # 右侧处理后文件区域
-        self.processed_files_widget = ProcessedFilesWidget()
-        self.processed_files_widget.setMinimumWidth(200)  # 设置最小宽度
-        self.processed_files_widget.setMaximumWidth(350)  # 设置最大宽度，防止过大
+        # 右侧区域 - 使用垂直分割器分为上下两部分
+        self.right_widget = QWidget()
+        self.right_widget.setMinimumWidth(200)  # 设置最小宽度
+        self.right_widget.setMaximumWidth(400)  # 设置最大宽度，防止过大
+        self.right_layout = QVBoxLayout(self.right_widget)
+        self.right_layout.setContentsMargins(0, 0, 0, 0)
+        self.right_layout.setSpacing(0)
         
-        # 添加三个区域到分割器，调整初始大小比例
+        # 创建右侧的垂直分割器
+        self.right_splitter = QSplitter(Qt.Orientation.Vertical)
+        self.right_splitter.setChildrenCollapsible(False)  # 防止完全折叠
+        
+        # 处理后文件区域 (放在上半部分)
+        self.processed_files_widget = ProcessedFilesWidget()
+        
+        # 数据操作标签页 (放在下半部分)
+        # tabs已经在前面创建了，直接使用
+        
+        # 添加到右侧分割器
+        self.right_splitter.addWidget(self.processed_files_widget)
+        self.right_splitter.addWidget(self.tabs)
+        
+        # 设置右侧分割器的初始比例 (上:下 = 1:2，Processed Files更紧凑)
+        self.right_splitter.setSizes([150, 300])
+        
+        # 将分割器添加到右侧布局
+        self.right_layout.addWidget(self.right_splitter)
+        
+        # 添加三个区域到主分割器，调整初始大小比例
         self.splitter.addWidget(self.left_widget)
         self.splitter.addWidget(self.center_widget)
-        self.splitter.addWidget(self.processed_files_widget)
+        self.splitter.addWidget(self.right_widget)
         
         # 设置分割器的初始大小，给中间区域更多空间
-        self.splitter.setSizes([220, 900, 220])  # 调整分割器初始大小比例
+        self.splitter.setSizes([220, 900, 280])  # 调整分割器初始大小比例
         
         # 设置分割器样式
         self.splitter.setHandleWidth(1)

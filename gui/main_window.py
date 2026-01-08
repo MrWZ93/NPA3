@@ -200,6 +200,9 @@ class FileExplorerApp(QMainWindow):
         self.file_list.setMouseTracking(True)
         self.file_list.setTextElideMode(Qt.TextElideMode.ElideMiddle)
         
+        # 导航历史记录 - 记住从哪个文件夹进入当前文件夹（必须在load_folder_contents之前初始化）
+        self.navigation_history = {}  # {parent_path: last_selected_child_path}
+        
         # 设置初始文件夹路径
         self.current_folder = self.get_initial_folder()
         self.folder_path.setText(self.current_folder)
@@ -505,8 +508,13 @@ class FileExplorerApp(QMainWindow):
         # 将工具栏添加到主布局
         self.central_layout.addWidget(toolbar_widget)
     
-    def load_folder_contents(self, folder_path):
-        """加载文件夹内容到列表小部件"""
+    def load_folder_contents(self, folder_path, highlight_path=None):
+        """加载文件夹内容到列表小部件
+        
+        Args:
+            folder_path: 要加载的文件夹路径
+            highlight_path: 需要高亮的项目路径（可选）
+        """
         self.file_list.clear()
         
         # 添加返回上级目录的选项
@@ -514,6 +522,10 @@ class FileExplorerApp(QMainWindow):
             parent_item = QListWidgetItem("📁..")
             parent_item.setData(Qt.ItemDataRole.UserRole, os.path.dirname(folder_path))
             self.file_list.addItem(parent_item)
+        
+        # 检查导航历史，看是否需要高亮某个项目
+        if highlight_path is None and folder_path in self.navigation_history:
+            highlight_path = self.navigation_history[folder_path]
         
         # 获取目录内容
         try:
@@ -537,6 +549,10 @@ class FileExplorerApp(QMainWindow):
                 list_item.setData(Qt.ItemDataRole.UserRole, dir_path)
                 list_item.setToolTip(dir_path)  # 设置完整路径为工具提示
                 self.file_list.addItem(list_item)
+                
+                # 如果这是需要高亮的项目，选中它
+                if highlight_path and dir_path == highlight_path:
+                    self.file_list.setCurrentItem(list_item)
             
             # 再添加文件（按名称排序）
             for file_name, file_path in sorted(files, key=lambda x: x[0].lower()):
@@ -544,6 +560,10 @@ class FileExplorerApp(QMainWindow):
                 list_item.setData(Qt.ItemDataRole.UserRole, file_path)
                 list_item.setToolTip(file_path)  # 设置完整路径为工具提示
                 self.file_list.addItem(list_item)
+                
+                # 如果这是需要高亮的项目，选中它
+                if highlight_path and file_path == highlight_path:
+                    self.file_list.setCurrentItem(list_item)
                 
         except Exception as e:
             QMessageBox.warning(self, "Error", f"Failed to load folder contents: {str(e)}")
@@ -637,6 +657,17 @@ class FileExplorerApp(QMainWindow):
         item_path = item.data(Qt.ItemDataRole.UserRole)
         
         if os.path.isdir(item_path):
+            # 记录导航历史：从当前文件夹进入了哪个子文件夹
+            parent_folder = self.current_folder
+            
+            # 如果选中的是返回上级目录的选项
+            if item.text() == "📁..":
+                # 不记录"..",但是会使用之前记录的历史来高亮
+                pass
+            else:
+                # 记录当前文件夹中选择的子文件夹
+                self.navigation_history[parent_folder] = item_path
+            
             # 如果选中的是目录，则进入该目录
             self.current_folder = item_path
             self.folder_path.setText(item_path)

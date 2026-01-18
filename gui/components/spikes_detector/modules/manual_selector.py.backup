@@ -312,7 +312,9 @@ class ManualSpikeSelector(QWidget):
                 layout.addWidget(self.plot_canvas.toolbar)
             layout.addWidget(self.plot_canvas)
         
-
+        # 显式输出调试信息，确认图形引用
+        print(f"plot_canvas: {plot_canvas}")
+        print(f"manual_fig: {self.manual_fig if hasattr(self, 'manual_fig') else 'None'}")
         
         # 更新手动选择图表
         try:
@@ -940,7 +942,12 @@ class ManualSpikeSelector(QWidget):
                 'final_duration': None
             }
             
-
+            print(f"\n=== DEBUG: Subplot2 Selection ===")
+            print(f"Selected time range: {xmin:.4f}s - {xmax:.4f}s")
+            print(f"Calculated indices: start_idx={start_idx}, end_idx={end_idx}")
+            print(f"Peak index: {peak_idx}, Peak time: {time_axis[peak_idx]:.4f}s")
+            print(f"Data length: {len(data)}, Time axis length: {len(time_axis)}")
+            print(f"==================================\n")
             
             # ==================== 修复高亮管理 ====================
             # 在zoomed_ax中高亮显示选择的区域
@@ -1094,6 +1101,13 @@ class ManualSpikeSelector(QWidget):
                 start_idx = start_idx_subplot2 + xmin_idx_in_subplot3
                 end_idx = start_idx_subplot2 + xmax_idx_in_subplot3
                 
+                print(f\"\n=== DEBUG: Snapping to Data Points ===\")
+                print(f\"Original selection: {xmin:.6f}s - {xmax:.6f}s\")
+                print(f\"Snapped to points: {xmin_snapped:.6f}s - {xmax_snapped:.6f}s\")
+                print(f\"Indices in subplot3 data: [{xmin_idx_in_subplot3}] - [{xmax_idx_in_subplot3}]\")
+                print(f\"Global indices: {start_idx} - {end_idx}\")
+                print(f\"====================================\")
+                
                 # 使用对齐后的值
                 xmin = xmin_snapped
                 xmax = xmax_snapped
@@ -1193,7 +1207,13 @@ class ManualSpikeSelector(QWidget):
                 'normalized_amplitude': normalized_amplitude
             })
             
-
+            print(f"\n=== DEBUG: Subplot3 Final Selection ===")
+            print(f"Original selection (subplot2): start_idx={self.current_manual_spike_data.get('start_idx')}, end_idx={self.current_manual_spike_data.get('end_idx')}")
+            print(f"Original time range: {self.current_manual_spike_data.get('start_time'):.4f}s - {self.current_manual_spike_data.get('end_time'):.4f}s")
+            print(f"Final selected time range (subplot3): {xmin:.4f}s - {xmax:.4f}s")
+            print(f"Final calculated indices: start_idx={start_idx}, end_idx={end_idx}")
+            print(f"Final peak index: {peak_idx}, Peak time: {time_axis[peak_idx]:.4f}s")
+            print(f"=========================================\n")
             
             # 在第三个子图中显示最终选择的区域
             if hasattr(self, 'spike_ax') and self.spike_ax is not None:
@@ -1215,52 +1235,6 @@ class ManualSpikeSelector(QWidget):
                 if hasattr(self, 'spike_ax') and self.spike_ax is not None:
                     self.spike_ax.set_xlim(current_xlim)
                     self.spike_ax.set_ylim(current_ylim)
-                    
-                    # 添加边界吸附点标记
-                    # 清除之前的吸附点标记
-                    if hasattr(self, '_snap_boundary_markers'):
-                        for marker in self._snap_boundary_markers:
-                            try:
-                                marker.remove()
-                            except:
-                                pass
-                    
-                    # 获取吸附后的边界点数据
-                    if start_idx_subplot2 is not None and end_idx_subplot2 is not None:
-                        subplot3_data = data[start_idx_subplot2:end_idx_subplot2+1]
-                        subplot3_time = time_axis[start_idx_subplot2:end_idx_subplot2+1]
-                        
-                        # 计算边界点在subplot3数据中的相对索引
-                        start_relative_idx = start_idx - start_idx_subplot2
-                        end_relative_idx = end_idx - start_idx_subplot2
-                        
-                        # 确保索引在有效范围内
-                        if 0 <= start_relative_idx < len(subplot3_data) and 0 <= end_relative_idx < len(subplot3_data):
-                            start_point_time = subplot3_time[start_relative_idx]
-                            start_point_value = subplot3_data[start_relative_idx]
-                            end_point_time = subplot3_time[end_relative_idx]
-                            end_point_value = subplot3_data[end_relative_idx]
-                            
-                            # 绘制边界吸附点标记（橙色圆圈）
-                            self._snap_boundary_markers = []
-                            
-                            # 起点标记
-                            marker_start = self.spike_ax.plot(
-                                start_point_time, start_point_value,
-                                'o', color='orange', markersize=10,
-                                markeredgecolor='white', markeredgewidth=2,
-                                alpha=0.8, zorder=12
-                            )[0]
-                            self._snap_boundary_markers.append(marker_start)
-                            
-                            # 终点标记
-                            marker_end = self.spike_ax.plot(
-                                end_point_time, end_point_value,
-                                'o', color='orange', markersize=10,
-                                markeredgecolor='white', markeredgewidth=2,
-                                alpha=0.8, zorder=12
-                            )[0]
-                            self._snap_boundary_markers.append(marker_end)
                     
                     # 仅重绘必要的部分
                     if hasattr(self, 'plot_canvas') and self.plot_canvas is not None:
@@ -1366,12 +1340,10 @@ class ManualSpikeSelector(QWidget):
             # 不在trace_ax上绘制蓝色highlight（用户不需要）
             # 只保留绿色的当前窗口位置标记（在update_manual_plot中绘制）
             
-            # 设置鼠标悬停时的光标样式
+            # 设置鼠标悬停时的光标样式提示可点击
             def on_hover(event):
                 if event.inaxes == self.trace_ax:
                     event.canvas.setCursor(Qt.CursorShape.PointingHandCursor)
-                elif event.inaxes == self.spike_ax:
-                    event.canvas.setCursor(Qt.CursorShape.CrossCursor)
                 else:
                     event.canvas.setCursor(Qt.CursorShape.ArrowCursor)
             
@@ -1519,7 +1491,19 @@ class ManualSpikeSelector(QWidget):
                 peak_data['start_idx'] = peak_data.get('final_start_idx')
                 peak_data['end_idx'] = peak_data.get('final_end_idx')
                 
-
+                print(f"\n=== DEBUG: Adding Manual Peak (with final selection) ===")
+                print(f"Using final selection data:")
+                print(f"  Time range: {final_start_time:.4f}s - {final_end_time:.4f}s")
+                print(f"  Indices: start_idx={peak_data['start_idx']}, end_idx={peak_data['end_idx']}")
+                print(f"  Peak ID will be: {self.manual_spike_count + 1}")
+                print(f"  Group: {peak_data.get('group', 'Default')}")
+                print(f"=========================================\n")
+            else:
+                print(f"\n=== DEBUG: Adding Manual Peak (NO final selection) ===")
+                print(f"Using original selection data:")
+                print(f"  Time range: {peak_data.get('start_time'):.4f}s - {peak_data.get('end_time'):.4f}s")
+                print(f"  Indices: start_idx={peak_data.get('start_idx')}, end_idx={peak_data.get('end_idx')}")
+                print(f"=========================================\n")
                 
             # 给峰值添加ID
             self.manual_spike_count += 1
@@ -1633,30 +1617,11 @@ class ManualSpikeSelector(QWidget):
             QMessageBox.warning(self, "Warning", "No peaks to export")
             return
         
-        # 导入所需模块（必须在使用前导入）
-        import csv
-        import os
-        from datetime import datetime
-        
-        # 获取源文件路径和文件名（从parent SpikesDetectorDialog）
+        # 获取数据文件路径作为默认路径
         default_dir = ""
-        source_filename = "data"  # 默认文件名
-        
-        # 向上遍历查找 SpikesDetectorDialog
-        parent_dialog = None
-        current = self.parent()
-        while current is not None:
-            # 检查类名是否是 SpikesDetectorDialog
-            if current.__class__.__name__ == 'SpikesDetectorDialog':
-                parent_dialog = current
-                break
-            current = current.parent() if hasattr(current, 'parent') else None
-        
-        if parent_dialog and hasattr(parent_dialog, 'source_file_path') and parent_dialog.source_file_path:
-            default_dir = os.path.dirname(parent_dialog.source_file_path)
-            # 提取文件名（不含扩展名）
-            source_filename = os.path.splitext(os.path.basename(parent_dialog.source_file_path))[0]
-
+        if hasattr(self, 'plot_canvas') and self.plot_canvas:
+            if hasattr(self.plot_canvas, 'file_path') and self.plot_canvas.file_path:
+                default_dir = os.path.dirname(self.plot_canvas.file_path)
         
         # 让用户选择保存文件夹
         folder_path = QFileDialog.getExistingDirectory(
@@ -1670,9 +1635,13 @@ class ManualSpikeSelector(QWidget):
             return
             
         try:
-            # 创建导出文件夹（使用源文件名_TIMESTAMP格式）
+            import csv
+            import os
+            
+            # 创建导出文件夹（peaks_export_TIMESTAMP）
+            from datetime import datetime
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            export_folder = os.path.join(folder_path, f"{source_filename}_{timestamp}")
+            export_folder = os.path.join(folder_path, f"peaks_export_{timestamp}")
             os.makedirs(export_folder, exist_ok=True)
             
             # 创建子文件夹
@@ -1738,14 +1707,25 @@ class ManualSpikeSelector(QWidget):
                         start_idx = spike.get('start_idx')
                         end_idx = spike.get('end_idx')
                         
+                        print(f"\n=== DEBUG: Exporting Spike {spike_id} (Group: {group_name}) ===")
+                        print(f"  Stored indices: start_idx={start_idx}, end_idx={end_idx}")
+                        print(f"  Stored time range: {spike.get('start_time'):.4f}s - {spike.get('end_time'):.4f}s")
                         
                         if start_idx is not None and end_idx is not None:
                             waveform = data_obj[start_idx:end_idx+1]
                             spike_waveforms.append(waveform)
                             spike_ids.append(spike_id)
                             max_length = max(max_length, len(waveform))
-                    
-
+                            
+                            # Verify the extracted data
+                            actual_time_start = time_axis[start_idx] if start_idx < len(time_axis) else 'OUT_OF_RANGE'
+                            actual_time_end = time_axis[end_idx] if end_idx < len(time_axis) else 'OUT_OF_RANGE'
+                            print(f"  Extracted waveform length: {len(waveform)}")
+                            print(f"  Actual time range from indices: {actual_time_start} - {actual_time_end}")
+                            print(f"  Waveform data range: min={np.min(waveform):.4f}, max={np.max(waveform):.4f}")
+                        else:
+                            print(f"  WARNING: Missing indices! start_idx={start_idx}, end_idx={end_idx}")
+                        print(f"=========================================\n")
                     
                     # 写入 CSV 文件
                     with open(group_csv, 'w', newline='') as f:
@@ -1891,21 +1871,29 @@ class ManualSpikeSelector(QWidget):
                 while dialog_parent is not None:
                     # 检查是否是 SpikesDetectorDialog（通过检查是否有 segmentation_enabled 属性）
                     if hasattr(dialog_parent, 'segmentation_enabled') and hasattr(dialog_parent, 'segment_manager'):
+                        print(f"DEBUG: Found SpikesDetectorDialog: {type(dialog_parent)}")
                         if dialog_parent.segmentation_enabled and dialog_parent.segment_manager is not None:
                             has_segments = True
                             num_segments = dialog_parent.segment_manager.num_segments
                             segment_manager = dialog_parent.segment_manager
+                            print(f"DEBUG: Segmentation enabled with {num_segments} segments")
                         break
                     # 继续向上查找
                     dialog_parent = dialog_parent.parent() if hasattr(dialog_parent, 'parent') else None
                 
+                print(f"DEBUG: has_segments result: {has_segments}")
+                print(f"DEBUG: num_segments: {num_segments}")
+                
                 if has_segments:
                     # 有 segmentation，只为包含 spikes 的 segments 生成图
+                    print(f"DEBUG: Total segments: {num_segments}")
+                    print(f"DEBUG: Total spikes to export: {len(self.manual_spikes)}")
                     
                     # 找出所有包含 spikes 的 segment 索引
                     segments_with_spikes = set()
                     for spike in self.manual_spikes:
                         spike_time = spike.get('time', 0)
+                        print(f"DEBUG: Spike ID {spike.get('id')} at time {spike_time}")
                         
                         # 确定这个 spike 属于哪个 segment
                         for seg_idx in range(num_segments):
@@ -1918,20 +1906,28 @@ class ManualSpikeSelector(QWidget):
                             
                             if seg_time_start <= spike_time <= seg_time_end:
                                 segments_with_spikes.add(seg_idx)
+                                print(f"DEBUG: Spike {spike.get('id')} belongs to segment {seg_idx + 1} (time range: {seg_time_start:.3f} - {seg_time_end:.3f})")
                                 break
+                    
+                    print(f"DEBUG: Segments with spikes: {sorted(segments_with_spikes)}")
+                    print(f"DEBUG: Number of segments to export: {len(segments_with_spikes)}")
                     
                     # 只为包含 spikes 的 segments 生成图表
                     for seg_idx in sorted(segments_with_spikes):
+                        print(f"DEBUG: Exporting segment {seg_idx + 1}...")
                         
                         # 获取该 segment 的数据和信息
                         seg_data = segment_manager.get_segment_data(seg_idx)
                         seg_info = segment_manager.get_segment_info(seg_idx)
                         
                         if seg_info is None:
+                            print(f"DEBUG: Warning - could not get info for segment {seg_idx + 1}")
                             continue
                         
                         seg_time_start = seg_info['start_time']
                         seg_time_end = seg_info['end_time']
+                        
+                        print(f"DEBUG: Segment {seg_idx + 1} data length: {len(seg_data)}, time range: {seg_time_start:.3f} - {seg_time_end:.3f}")
                         
                         # 创建时间轴
                         num_samples = len(seg_data)
@@ -1960,6 +1956,8 @@ class ManualSpikeSelector(QWidget):
                                 spike_idx_in_seg = np.abs(seg_time_axis - spike_time).argmin()
                                 spike_amp = seg_data[spike_idx_in_seg]
                                 
+                                print(f"DEBUG:   Marking spike {spike_id} in segment {seg_idx + 1} at time {spike_time:.3f}")
+                                
                                 # 标记 spike 位置
                                 ax.plot(spike_time, spike_amp, 'ro', markersize=8)
                                 
@@ -1977,8 +1975,10 @@ class ManualSpikeSelector(QWidget):
                         
                         # 保存图表
                         trace_plot_path = os.path.join(full_trace_folder, f"full_trace_segment_{seg_idx + 1}.png")
+                        print(f"DEBUG: Saving to {trace_plot_path}")
                         fig.savefig(trace_plot_path, dpi=150, bbox_inches='tight')
                         plt.close(fig)
+                        print(f"DEBUG: Successfully saved segment {seg_idx + 1}")
                 else:
                     # 没有 segmentation，生成单个完整图表
                     fig, ax = plt.subplots(figsize=(14, 4))

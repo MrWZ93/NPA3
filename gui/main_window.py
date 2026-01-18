@@ -1092,8 +1092,12 @@ class FileExplorerApp(QMainWindow):
         
         # 如果对话框已存在，则显示并激活它，同时更新数据
         if hasattr(self, 'spikes_detector_dialog') and self.spikes_detector_dialog is not None:
-            # 更新数据（以防用户加载了新文件）
-            self.spikes_detector_dialog.set_data(self.visualizer.data, self.visualizer.sampling_rate)
+            # 更新数据（以防用户加载了新文件）并传递文件路径
+            self.spikes_detector_dialog.set_data(
+                self.visualizer.data, 
+                self.visualizer.sampling_rate,
+                source_file_path=self.current_file_path
+            )
             self.spikes_detector_dialog.show()
             self.spikes_detector_dialog.raise_()
             self.spikes_detector_dialog.activateWindow()
@@ -1101,8 +1105,12 @@ class FileExplorerApp(QMainWindow):
             # 创建新的峰值检测器对话框
             self.spikes_detector_dialog = SpikesDetectorDialog(self)
             
-            # 设置数据和采样率
-            self.spikes_detector_dialog.set_data(self.visualizer.data, self.visualizer.sampling_rate)
+            # 设置数据、采样率和文件路径
+            self.spikes_detector_dialog.set_data(
+                self.visualizer.data, 
+                self.visualizer.sampling_rate,
+                source_file_path=self.current_file_path
+            )
             
             # 显示为非模态对话框（允许与其他窗口交互）
             self.spikes_detector_dialog.show()

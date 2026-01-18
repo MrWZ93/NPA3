@@ -59,6 +59,9 @@ class SpikesDetectorDialog(QDialog):
         self.num_segments = 10  # 总段数
         self.segmentation_enabled = False  # 是否启用分段
         
+        # 源文件路径（从main window传递）
+        self.source_file_path = None
+        
         # 主布局
         self.main_layout = QVBoxLayout(self)
         
@@ -713,8 +716,19 @@ class SpikesDetectorDialog(QDialog):
             self.status_bar.showMessage(f"Error loading file: {str(e)}")
             print(f"Error in load_file: {str(e)}")
     
-    def set_data(self, data, sampling_rate=None):
-        """设置数据（外部调用）"""
+    def set_data(self, data, sampling_rate=None, source_file_path=None):
+        """设置数据（外部调用）
+        
+        参数:
+            data: 数据
+            sampling_rate: 采样率
+            source_file_path: 源文件路径（从main window传递）
+        """
+        # 保存源文件路径
+        if source_file_path is not None:
+            self.source_file_path = source_file_path
+
+        
         # 如果有手动标记的 spikes，询问用户是否要清除
         if hasattr(self, 'manual_selector') and self.manual_selector is not None:
             if hasattr(self.manual_selector, 'manual_spikes') and len(self.manual_selector.manual_spikes) > 0:
@@ -1059,10 +1073,20 @@ class SpikesDetectorDialog(QDialog):
             if hasattr(self.manual_selector, 'set_time_offset'):
                 self.manual_selector.set_time_offset(time_offset)
             
-            # 恢复之前的手动标记（如果有）
-            _, manual_results = self.segment_manager.get_segment_results(segment_index)
-            if manual_results and hasattr(self.manual_selector, 'load_manual_results'):
-                self.manual_selector.load_manual_results(manual_results)
+            # **修复：始终加载所有segments的手动标记，而不只是当前segment**
+            # 这样List会始终显示所有spikes，不随segment切换而过滤
+            all_manual_spikes = []
+            for seg_idx in range(self.num_segments):
+                _, seg_manual_results = self.segment_manager.get_segment_results(seg_idx)
+                if seg_manual_results:
+                    all_manual_spikes.extend(seg_manual_results)
+            
+            # 加载所有segments的累积数据
+            if all_manual_spikes and hasattr(self.manual_selector, 'load_manual_results'):
+                self.manual_selector.load_manual_results(all_manual_spikes)
+            elif hasattr(self.manual_selector, 'load_manual_results'):
+                # 如果没有任何数据，清空列表
+                self.manual_selector.load_manual_results([])
             
             # 重要！调用 update_manual_plot 来刷新 manual selector 的显示
             if hasattr(self.manual_selector, 'update_manual_plot'):

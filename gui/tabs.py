@@ -596,21 +596,36 @@ class ProcessingTab(QWidget):
             start_spin.setRange(0, 1000000)
             start_spin.setValue(0)
             start_spin.setSuffix(" s")  # Add seconds suffix
-            start_spin.setDecimals(3)  # Allow millisecond precision
+            start_spin.setDecimals(6)  # Allow microsecond precision (6 decimal places)
             start_spin.setMinimumWidth(200)  # Set minimum width
             
             end_spin = QDoubleSpinBox()
             end_spin.setRange(0, 1000000)
             end_spin.setValue(10)  # **修复**: 设置一个合理的默认结束时间10秒
             end_spin.setSuffix(" s")  # Add seconds suffix
-            end_spin.setDecimals(3)  # Allow millisecond precision
+            end_spin.setDecimals(6)  # Allow microsecond precision (6 decimal places)
             end_spin.setMinimumWidth(200)  # Set minimum width
             
             self.params_layout.addRow("Start Time:", start_spin)
             self.params_layout.addRow("End Time:", end_spin)
             
+            # Duration display label
+            self.trim_duration_label = QLabel()
+            self.trim_duration_label.setStyleSheet(
+                "color: #2ecc71; font-weight: bold; padding: 2px 0;"
+            )
+            self.trim_duration_label.setTextInteractionFlags(
+                Qt.TextInteractionFlag.TextSelectableByMouse
+            )
+            self.params_layout.addRow("Duration:", self.trim_duration_label)
+            
             self.param_widgets["start_time"] = start_spin
             self.param_widgets["end_time"] = end_spin
+            
+            # Connect signals to update duration display
+            start_spin.valueChanged.connect(self._update_trim_duration)
+            end_spin.valueChanged.connect(self._update_trim_duration)
+            self._update_trim_duration()  # Initialize display
             
         elif self.current_operation in ["低通滤波", "高通滤波"]:  # Filters
             cutoff_spin = QDoubleSpinBox()
@@ -756,6 +771,35 @@ class ProcessingTab(QWidget):
             self.fit_start_label.setVisible(True)
             self.fit_end_label.setVisible(True)
     
+    def _update_trim_duration(self):
+        """Update the duration display based on current start/end time values."""
+        if not hasattr(self, 'trim_duration_label'):
+            return
+        start = self.param_widgets.get("start_time")
+        end = self.param_widgets.get("end_time")
+        if start is None or end is None:
+            return
+        duration = end.value() - start.value()
+        if duration < 0:
+            self.trim_duration_label.setText("⚠ Invalid range")
+            self.trim_duration_label.setStyleSheet(
+                "color: #e74c3c; font-weight: bold; padding: 2px 0;"
+            )
+        else:
+            # Format nicely: show ms when < 1s, otherwise seconds
+            if duration < 1.0:
+                display = f"{duration * 1000:.3f} ms"
+            elif duration < 60.0:
+                display = f"{duration:.6f} s"
+            else:
+                minutes = int(duration) // 60
+                seconds = duration - minutes * 60
+                display = f"{minutes} min {seconds:.3f} s"
+            self.trim_duration_label.setText(display)
+            self.trim_duration_label.setStyleSheet(
+                "color: #2ecc71; font-weight: bold; padding: 2px 0;"
+            )
+
     def _on_trim_mode_changed(self, index):
         """剪切模式变更处理"""
         if index == 0:  # 正剪切模式

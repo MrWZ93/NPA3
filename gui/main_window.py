@@ -1066,16 +1066,12 @@ class FileExplorerApp(QMainWindow):
 
     def open_curve_fitter(self):
         """打开曲线拟合工具"""
-        # 检查是否有加载的数据
-        if not hasattr(self.visualizer, 'data') or self.visualizer.data is None:
-            QMessageBox.warning(self, "Error", "Please load data first")
-            return
-            
-        # 创建拟合对话框
-        dialog = SimpleFitterDialog(self)
+        # 创建拟合对话框（不强制要求已加载数据——用户可通过文件浏览器选择文件）
+        dialog = SimpleFitterDialog(self, initial_folder=self.current_folder)
         
-        # 设置数据
-        dialog.set_data(self.visualizer.data)
+        # 如果主窗口已有数据，自动传入
+        if hasattr(self.visualizer, 'data') and self.visualizer.data is not None:
+            dialog.set_data(self.visualizer.data)
         
         # 显示对话框
         dialog.exec()

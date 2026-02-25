@@ -63,11 +63,14 @@ class ConfigManager:
     
     def update_config(self, key, value):
         """更新单个配置项"""
-        self.config[key] = value
+        latest_config = self.load_config()
+        latest_config[key] = value
+        self.config = latest_config
         return self.save_config()
     
     def add_recent_folder(self, folder_path):
         """添加最近使用的文件夹"""
+        self.config = self.load_config()
         if 'recent_folders' not in self.config:
             self.config['recent_folders'] = []
         

@@ -160,6 +160,60 @@ class IVPlotCanvas(FigureCanvas):
         self.ax.legend(h2, l2, fontsize=9)
         self.draw()
 
+    def plot_multiple(self, curves_list, title="I-V Curve Comparison"):
+        self.ax.clear()
+        self._fit_line = None
+        
+        if len(curves_list) == 1:
+            data_colors = ["#93a19d"] # RGB(147, 161, 157)
+            fit_colors = ["#de6938"]  # RGB(222, 105, 56)
+            data_alpha = 0.6
+        else:
+            colors = ["#2980b9", "#27ae60", "#e74c3c", "#8e44ad", "#e67e22", "#16a085", "#f39c12"]
+            data_colors = colors
+            fit_colors = colors
+            # Use 0.01 representing 99% transparency
+            data_alpha = 0.01
+        
+        for idx, curve in enumerate(curves_list):
+            d_color = data_colors[idx % len(data_colors)]
+            f_color = fit_colors[idx % len(fit_colors)]
+            
+            name = curve['name']
+            data = curve['data']
+            v_scale = data.get("v_scale", 1.0)
+            i_scale = data.get("i_scale", 1.0)
+            
+            v = data["v_fit"] / v_scale
+            i = data["i_fit"] / i_scale
+            order = np.argsort(v)
+            self.ax.plot(v[order], i[order], 
+                         marker='o', markersize=3, linestyle='', 
+                         alpha=data_alpha, color=d_color, 
+                         markeredgecolor='none',
+                         label=f"{name[:12]} Data")
+            
+            fit_v_V = np.linspace(data["v_fit"].min(), data["v_fit"].max(), 500)
+            G_nS, offset_nA = data["popt"]
+            fit_i_nA = G_nS * fit_v_V + offset_nA
+            
+            self.ax.plot(fit_v_V / v_scale, fit_i_nA / i_scale, 
+                         color=f_color, linewidth=2.0, alpha=0.9,
+                         label=f"{name[:12]} Fit")
+                         
+        if curves_list:
+            v_unit = curves_list[0]['data']['v_unit']
+            i_unit = curves_list[0]['data']['i_unit']
+            self.ax.set_xlabel(f"Voltage ({v_unit})", fontsize=10)
+            self.ax.set_ylabel(f"Current ({i_unit})", fontsize=10)
+            
+        self.ax.set_title(title, fontsize=11, fontweight="bold", color="#2c3e50")
+        self.ax.grid(True, linestyle="--", alpha=0.45, color="#cccccc")
+        self.ax.spines["top"].set_visible(False)
+        self.ax.spines["right"].set_visible(False)
+        self.ax.legend(fontsize=8, loc='best')
+        self.draw()
+
     def _install_span(self):
         if self._span is not None:
             try:
@@ -172,6 +226,197 @@ class IVPlotCanvas(FigureCanvas):
                 useblit=True,
                 props=dict(alpha=0.20, facecolor="#f39c12"),
                 interactive=True, drag_from_anywhere=True, minspan=1e-9)
+
+
+# ---------------------------------------------------------------------------
+# Data Canvas (Time/Index Series)
+# ---------------------------------------------------------------------------
+
+class DataPlotCanvas(FigureCanvas):
+    def __init__(self, parent=None, on_region_selected=None):
+        self.fig = Figure(figsize=(6, 5), dpi=100, tight_layout=True)
+        self.ax_v = self.fig.add_subplot(211)
+        self.ax_i = self.fig.add_subplot(212, sharex=self.ax_v)
+        super().__init__(self.fig)
+        self.setParent(parent)
+        self._span = None
+        self._on_region_selected = on_region_selected
+        self._init_axes()
+        self.draw()
+
+    def _init_axes(self):
+        for ax in (self.ax_v, self.ax_i):
+            ax.grid(True, linestyle="--", alpha=0.45, color="#cccccc")
+            ax.spines["top"].set_visible(False)
+            ax.spines["right"].set_visible(False)
+
+    def plot_data(self, voltage, current, v_label="Voltage (V)", i_label="Current (nA)", title="Data"):
+        self.ax_v.clear()
+        self.ax_i.clear()
+        self._init_axes()
+        
+        indices = np.arange(len(voltage))
+        self.ax_v.plot(indices, voltage, color="#3498db", linewidth=1.0)
+        self.ax_v.set_ylabel(v_label, fontsize=10)
+        self.ax_v.set_title(title, fontsize=11, fontweight="bold", color="#2c3e50")
+        
+        self.ax_i.plot(indices, current, color="#e74c3c", linewidth=1.0)
+        self.ax_i.set_ylabel(i_label, fontsize=10)
+        self.ax_i.set_xlabel("Index", fontsize=10)
+
+        self.draw()
+        self._install_span()
+
+    def _install_span(self):
+        if self._span is not None:
+            try:
+                self._span.set_visible(False)
+            except Exception:
+                pass
+        if self._on_region_selected:
+            self._span = SpanSelector(
+                self.ax_v, self._on_region_selected, "horizontal",
+                useblit=True,
+                props=dict(alpha=0.20, facecolor="#f39c12"),
+                interactive=True, drag_from_anywhere=True, minspan=1)
+
+# ---------------------------------------------------------------------------
+# IV Result Dialog
+# ---------------------------------------------------------------------------
+
+class IVResultDialog(QDialog):
+    def __init__(self, parent=None, default_dir=None):
+        super().__init__(parent)
+        self.setWindowTitle("I-V Curve Comparison & Results")
+        self.resize(1100, 600)
+        self.setModal(False)
+        self._default_dir = default_dir or os.path.expanduser("~")
+        
+        self._preview_curve = None
+        self._pinned_curves = []
+        
+        layout = QHBoxLayout(self)
+        
+        left_layout = QVBoxLayout()
+        left_layout.addWidget(QLabel("Saved Curves:"))
+        self._list = QListWidget()
+        self._list.setSelectionMode(QListWidget.SelectionMode.ExtendedSelection)
+        self._list.itemSelectionChanged.connect(self._replot_and_text)
+        left_layout.addWidget(self._list)
+        
+        btn_layout = QHBoxLayout()
+        btn_delete = QPushButton("Delete")
+        btn_delete.setStyleSheet("background-color:#c0392b; color:white; font-weight:bold; padding:4px;")
+        btn_delete.setToolTip("Delete selected curves")
+        btn_delete.clicked.connect(self._delete_selected)
+        btn_layout.addWidget(btn_delete)
+        
+        btn_export = QPushButton("Export")
+        btn_export.setStyleSheet("background-color:#27ae60; color:white; font-weight:bold; padding:4px;")
+        btn_export.setToolTip("Export selected curves data to CSV")
+        btn_export.clicked.connect(self._export_data)
+        btn_layout.addWidget(btn_export)
+        
+        left_layout.addLayout(btn_layout)
+        
+        layout.addLayout(left_layout, 2)
+        
+        center_layout = QVBoxLayout()
+        self._canvas = IVPlotCanvas(self, on_region_selected=None)
+        self._toolbar = NavigationToolbar(self._canvas, self)
+        center_layout.addWidget(self._toolbar)
+        center_layout.addWidget(self._canvas, 1)
+        layout.addLayout(center_layout, 5)
+        
+        right_layout = QVBoxLayout()
+        right_layout.addWidget(QLabel("Fit Details:"))
+        self._detail = QTextEdit()
+        self._detail.setReadOnly(True)
+        self._detail.setFont(QFont("Courier New", 10))
+        right_layout.addWidget(self._detail)
+        layout.addLayout(right_layout, 3)
+
+    def set_preview(self, name, text, fit_data):
+        self._preview_curve = {"name": f"[Preview] {name}", "text": text, "data": fit_data}
+        self._replot_and_text()
+
+    def add_curve(self, base_name, text, fit_data):
+        idx = 1
+        new_name = f"{base_name}_{idx}"
+        existing_names = [c["name"] for c in self._pinned_curves]
+        while new_name in existing_names:
+            idx += 1
+            new_name = f"{base_name}_{idx}"
+            
+        curve = {"name": new_name, "text": text, "data": fit_data}
+        self._pinned_curves.append(curve)
+        
+        item = QListWidgetItem(new_name)
+        item.setData(Qt.ItemDataRole.UserRole, curve)
+        self._list.addItem(item)
+        
+        self._list.clearSelection()
+        item.setSelected(True)
+        
+    def _replot_and_text(self):
+        selected_items = self._list.selectedItems()
+        selected_curves = [item.data(Qt.ItemDataRole.UserRole) for item in selected_items]
+        
+        curves_to_plot = []
+        if self._preview_curve and not selected_curves:
+            curves_to_plot = [self._preview_curve]
+        else:
+            curves_to_plot = selected_curves
+            
+        full_text = ""
+        for c in curves_to_plot:
+            full_text += f"==== {c['name']} ====\n" + c['text'] + "\n\n"
+        self._detail.setPlainText(full_text)
+        
+        if hasattr(self._canvas, "plot_multiple"):
+            self._canvas.plot_multiple(curves_to_plot)
+
+    def _delete_selected(self):
+        selected_items = self._list.selectedItems()
+        if not selected_items:
+            return
+            
+        for item in selected_items:
+            curve = item.data(Qt.ItemDataRole.UserRole)
+            if curve in self._pinned_curves:
+                self._pinned_curves.remove(curve)
+            row = self._list.row(item)
+            self._list.takeItem(row)
+            
+        self._replot_and_text()
+
+    def _export_data(self):
+        selected_items = self._list.selectedItems()
+        if not selected_items:
+            if self._preview_curve and self._list.count() == 0:
+                QMessageBox.information(self, "List Empty", "Please 'Pin' the curve first, then select it to export.")
+            else:
+                QMessageBox.information(self, "No Selection", "Please select at least one pinned curve from the list to export.")
+            return
+            
+        folder = QFileDialog.getExistingDirectory(self, "Select Export Folder", self._default_dir)
+        if not folder: return
+        
+        for item in selected_items:
+            curve = item.data(Qt.ItemDataRole.UserRole)
+            name = curve["name"]
+            data = curve["data"]
+            fname = os.path.join(folder, f"{name}.csv")
+            try:
+                v = data["v_fit"]
+                i = data["i_fit"]
+                arr = np.column_stack((v, i))
+                header = f"Voltage ({data['v_unit']}),Current ({data['i_unit']})"
+                np.savetxt(fname, arr, delimiter=",", header=header, comments="")
+            except Exception as e:
+                QMessageBox.warning(self, "Export Error", f"Failed to export {name}:\n{e}")
+                
+        QMessageBox.information(self, "Export Complete", f"Exported {len(selected_items)} curves to {folder}")
 
 
 # ---------------------------------------------------------------------------
@@ -295,7 +540,9 @@ class SimpleFitterDialog(QDialog):
         self._selected_vmin = None
         self._selected_vmax = None
         self._initial_folder = initial_folder
+        self._current_folder = initial_folder or os.path.expanduser("~")
         self._config = ConfigManager()
+        self._iv_dialog = None
 
         self._build_ui()
         self._load_settings()
@@ -328,10 +575,10 @@ class SimpleFitterDialog(QDialog):
 
         rl.addWidget(self._build_channel_row())
 
-        plot_group = QGroupBox("I-V Curve")
+        plot_group = QGroupBox("Voltage and Current Data")
         pg = QVBoxLayout(plot_group)
         pg.setContentsMargins(4, 8, 4, 4)
-        self._canvas = IVPlotCanvas(parent=self, on_region_selected=self._on_span)
+        self._canvas = DataPlotCanvas(parent=self, on_region_selected=self._on_span)
         self._toolbar = NavigationToolbar(self._canvas, self)
         self._toolbar.setMaximumHeight(30)
         pg.addWidget(self._toolbar)
@@ -373,7 +620,20 @@ class SimpleFitterDialog(QDialog):
         self._inv_i = QCheckBox("Invert I")
         lay.addWidget(self._inv_v)
         lay.addWidget(self._inv_i)
+        save_ch_btn = QPushButton("Save Channels")
+        save_ch_btn.setStyleSheet("background-color:#7f8c8d; color:white; padding:4px 8px;")
+        save_ch_btn.clicked.connect(self._save_channels)
+        save_ch_btn.setToolTip("Save current Voltage/Current channel and invert settings as default.")
+        lay.addWidget(save_ch_btn)
+
         lay.addStretch(1)
+
+        self._v_combo.currentIndexChanged.connect(lambda _: self._auto_plot())
+        self._i_combo.currentIndexChanged.connect(lambda _: self._auto_plot())
+        self._v_unit.currentIndexChanged.connect(lambda _: self._auto_plot())
+        self._i_unit.currentIndexChanged.connect(lambda _: self._auto_plot())
+        self._inv_v.toggled.connect(lambda _: self._auto_plot())
+        self._inv_i.toggled.connect(lambda _: self._auto_plot())
 
         return g
 
@@ -402,6 +662,18 @@ class SimpleFitterDialog(QDialog):
                 (lambda s: lambda: self._perform_fit(s))(use_sel))
             lay.addWidget(btn)
 
+        self._show_iv_btn = QPushButton("Show I-V Curve")
+        self._show_iv_btn.setStyleSheet("background-color:#8e44ad; color:white; font-weight:bold; padding:6px 14px;")
+        self._show_iv_btn.setEnabled(False)
+        self._show_iv_btn.clicked.connect(self._show_iv_dialog)
+        lay.addWidget(self._show_iv_btn)
+
+        self._pin_btn = QPushButton("Pin to IV Curve")
+        self._pin_btn.setStyleSheet("background-color:#f39c12; color:white; font-weight:bold; padding:6px 14px;")
+        self._pin_btn.setEnabled(False)
+        self._pin_btn.clicked.connect(self._pin_iv_curve)
+        lay.addWidget(self._pin_btn)
+
         copy_btn = QPushButton("Copy")
         copy_btn.setMaximumWidth(65)
         copy_btn.clicked.connect(self._copy_results)
@@ -422,9 +694,9 @@ class SimpleFitterDialog(QDialog):
 
     def _build_results_area(self):
         g = QGroupBox("Results")
-        outer = QVBoxLayout(g)
+        outer = QHBoxLayout(g)
         outer.setContentsMargins(8, 10, 8, 8)
-        outer.setSpacing(7)
+        outer.setSpacing(15)
 
         # Key value cards
         cards = QHBoxLayout()
@@ -435,24 +707,10 @@ class SimpleFitterDialog(QDialog):
         for c in (self._card_r, self._card_g, self._card_d):
             c.setMinimumHeight(86)
             cards.addWidget(c)
-        outer.addLayout(cards)
+        
+        outer.addWidget(self._build_params(), 0)
+        outer.addLayout(cards, 1)
 
-        # Parameters + detail
-        bottom = QHBoxLayout()
-        bottom.setSpacing(8)
-        bottom.addWidget(self._build_params(), 0)
-
-        detail_g = QGroupBox("Fit Details")
-        dgl = QVBoxLayout(detail_g)
-        dgl.setContentsMargins(6, 8, 6, 6)
-        self._detail = QTextEdit()
-        self._detail.setReadOnly(True)
-        self._detail.setFont(QFont("Courier New", 10))
-        self._detail.setPlaceholderText("Select a file, then click Fit.")
-        dgl.addWidget(self._detail)
-        bottom.addWidget(detail_g, 1)
-
-        outer.addLayout(bottom)
         return g
 
     def _build_params(self):
@@ -496,9 +754,13 @@ class SimpleFitterDialog(QDialog):
         self._auto_plot()
 
     def _populate_combos(self, data):
+        self._v_combo.blockSignals(True)
+        self._i_combo.blockSignals(True)
         self._v_combo.clear()
         self._i_combo.clear()
         if data is None:
+            self._v_combo.blockSignals(False)
+            self._i_combo.blockSignals(False)
             return
         channels = (list(data.keys()) if isinstance(data, dict)
                     else [f"Channel {i+1}"
@@ -510,6 +772,16 @@ class SimpleFitterDialog(QDialog):
         if len(channels) >= 2:
             self._v_combo.setCurrentIndex(0)
             self._i_combo.setCurrentIndex(1)
+        # Restore saved channel selections (must happen here, after channels
+        # are populated — at _load_settings time the combos are still empty).
+        s = self._config.config.get(self._SETTINGS_KEY, {})
+        if s.get("v_channel") in channels:
+            self._v_combo.setCurrentText(s["v_channel"])
+        if s.get("i_channel") in channels:
+            self._i_combo.setCurrentText(s["i_channel"])
+            
+        self._v_combo.blockSignals(False)
+        self._i_combo.blockSignals(False)
 
     def _get_channel(self, data, combo):
         ch = combo.currentText()
@@ -524,6 +796,7 @@ class SimpleFitterDialog(QDialog):
         ok, data, info = processor.load_file(file_path)
         if ok:
             self._raw_data = data
+            self._current_folder = os.path.dirname(file_path)
             self._populate_combos(data)
             self._reset_results()
             self._auto_plot(title=os.path.basename(file_path))
@@ -534,6 +807,11 @@ class SimpleFitterDialog(QDialog):
     def _auto_plot(self, title=None):
         if self._raw_data is None:
             return
+        if title is not None:
+            self._current_title = title
+        elif not hasattr(self, '_current_title'):
+            self._current_title = "I-V Curve"
+
         v = self._get_channel(self._raw_data, self._v_combo)
         i = self._get_channel(self._raw_data, self._i_combo)
         if v is None or i is None:
@@ -554,28 +832,32 @@ class SimpleFitterDialog(QDialog):
         self._range_lbl.setText("Drag on the plot to select a fit region, or click Fit All")
         self._range_lbl.setStyleSheet("color: #95a5a6; font-style: italic;")
 
+        self._reset_results()
+
         v_lbl = f"Voltage ({self._v_unit.currentText()})"
         i_lbl = f"Current ({self._i_unit.currentText()})"
-        self._canvas.plot_iv(
-            # Show in original units for axes labels, but internally we have V/nA
+        self._canvas.plot_data(
             v / v_scale, i / i_scale,
-            xlabel=v_lbl, ylabel=i_lbl,
-            title=title or "I-V Curve")
+            v_label=v_lbl, i_label=i_lbl,
+            title=self._current_title)
 
     # ------------------------------------------------------------------
     # SpanSelector
     # ------------------------------------------------------------------
 
-    def _on_span(self, vmin, vmax):
-        if self._voltage_data is None or abs(vmax - vmin) < 1e-12:
+    def _on_span(self, imin, imax):
+        if self._voltage_data is None:
             return
-        v_scale = self.V_UNITS.get(self._v_unit.currentText(), 1.0)
-        # span is in displayed units; convert to V
-        self._selected_vmin = min(vmin, vmax) * v_scale
-        self._selected_vmax = max(vmin, vmax) * v_scale
-        unit = self._v_unit.currentText()
+        idx_min = max(0, int(imin))
+        idx_max = min(len(self._voltage_data)-1, int(imax))
+        if idx_min >= idx_max:
+             return
+             
+        self._selected_imin = idx_min
+        self._selected_imax = idx_max
         self._range_lbl.setText(
-            f"V: [{min(vmin,vmax):.4g} → {max(vmin,vmax):.4g}] {unit}")
+            f"Index: [{idx_min} → {idx_max}]   "
+            f"({idx_max - idx_min + 1} points)")
         self._range_lbl.setStyleSheet("color: #d35400; font-weight: bold;")
 
     # ------------------------------------------------------------------
@@ -590,21 +872,18 @@ class SimpleFitterDialog(QDialog):
         v, i = self._voltage_data, self._current_data  # V and nA
 
         if use_selection:
-            if self._selected_vmin is None:
+            if getattr(self, '_selected_imin', None) is None:
                 QMessageBox.information(
                     self, "No Selection",
-                    "Drag on the plot to select a voltage range first.")
+                    "Drag on the Voltage plot to select a data region first.")
                 return
-            mask = (v >= self._selected_vmin) & (v <= self._selected_vmax)
-            if mask.sum() < 3:
+            v_fit = v[self._selected_imin : self._selected_imax + 1]
+            i_fit = i[self._selected_imin : self._selected_imax + 1]
+            if len(v_fit) < 3:
                 QMessageBox.warning(self, "Too Few Points",
                                     "Selected region has fewer than 3 points.")
                 return
-            v_fit, i_fit = v[mask], i[mask]
-            v_scale = self.V_UNITS.get(self._v_unit.currentText(), 1.0)
-            region_str = (f"[{self._selected_vmin/v_scale:.4g}"
-                          f" → {self._selected_vmax/v_scale:.4g}]"
-                          f" {self._v_unit.currentText()}")
+            region_str = f"Indices [{self._selected_imin} → {self._selected_imax}]"
         else:
             v_fit, i_fit = v, i
             region_str = "full range"
@@ -622,12 +901,9 @@ class SimpleFitterDialog(QDialog):
             r2 = 1 - ss_res / ss_tot if ss_tot > 0 else 0.0
             rmse = np.sqrt((residuals ** 2).mean())
 
-            # Draw fit line (in displayed units)
+            # For the dialog we only need units
             v_scale = self.V_UNITS.get(self._v_unit.currentText(), 1.0)
             i_scale = self.I_UNITS.get(self._i_unit.currentText(), 1.0)
-            fit_v_V = np.linspace(v_fit.min(), v_fit.max(), 500)
-            fit_i_nA = G_nS * fit_v_V + offset_nA
-            self._canvas.plot_fit(fit_v_V / v_scale, fit_i_nA / i_scale)
 
             # Key values
             R_GOhm = 1.0 / G_nS              # nS⁻¹ = GΩ
@@ -662,8 +938,25 @@ class SimpleFitterDialog(QDialog):
             det += f"  Diameter  : {D_nm:.2f} nm\n"
             det += f"  Radius    : {D_nm/2:.2f} nm\n"
 
-            self._detail.setPlainText(det)
-            self._last_result = det
+            self._last_result_text = det
+            self._last_fit_data = {
+                "v_fit": v_fit,
+                "i_fit": i_fit,
+                "popt": popt,
+                "v_unit": self._v_unit.currentText(),
+                "i_unit": self._i_unit.currentText(),
+                "v_scale": v_scale,
+                "i_scale": i_scale
+            }
+            if hasattr(self, '_show_iv_btn'):
+                self._show_iv_btn.setEnabled(True)
+                self._pin_btn.setEnabled(True)
+                
+            if self._iv_dialog is not None and self._iv_dialog.isVisible():
+                title = getattr(self, '_current_title', "Data")
+                self._iv_dialog.set_preview(title, self._last_result_text, self._last_fit_data)
+            else:
+                self._show_iv_dialog()
 
         except Exception as e:
             QMessageBox.critical(self, "Fit Error", str(e))
@@ -691,6 +984,10 @@ class SimpleFitterDialog(QDialog):
             "Current unit selections and nanopore parameters have been saved\n"
             "and will be restored next time you open the Fitter.")
 
+    def _save_channels(self):
+        self._config.update_config(self._SETTINGS_KEY, self._settings_dict())
+        QMessageBox.information(self, "Channels Saved", "The default Voltage/Current channels and inverted states have been saved.")
+
     def _load_settings(self):
         s = self._config.config.get(self._SETTINGS_KEY)
         if not s:
@@ -716,12 +1013,40 @@ class SimpleFitterDialog(QDialog):
         self._card_r.reset()
         self._card_g.reset()
         self._card_d.reset()
-        self._detail.clear()
+        self._last_result_text = ""
+        self._last_fit_data = None
+        if hasattr(self, '_show_iv_btn'):
+            self._show_iv_btn.setEnabled(False)
+            self._pin_btn.setEnabled(False)
 
     def _copy_results(self):
-        text = self._detail.toPlainText()
-        if text:
-            QApplication.clipboard().setText(text)
+        if hasattr(self, '_last_result_text') and self._last_result_text:
+            QApplication.clipboard().setText(self._last_result_text)
             QMessageBox.information(self, "Copied", "Results copied to clipboard.")
         else:
             QMessageBox.information(self, "Nothing to Copy", "Run a fit first.")
+
+    def _show_iv_dialog(self):
+        if not hasattr(self, '_last_fit_data') or not self._last_fit_data:
+            return
+            
+        if self._iv_dialog is None:
+            self._iv_dialog = IVResultDialog(self, default_dir=self._current_folder)
+            
+        title = getattr(self, '_current_title', "Data")
+        self._iv_dialog.set_preview(title, self._last_result_text, self._last_fit_data)
+        if not self._iv_dialog.isVisible():
+            self._iv_dialog.show()
+
+    def _pin_iv_curve(self):
+        if not hasattr(self, '_last_fit_data') or not self._last_fit_data:
+            return
+            
+        if self._iv_dialog is None:
+            self._iv_dialog = IVResultDialog(self, default_dir=self._current_folder)
+            
+        title = getattr(self, '_current_title', "Data")
+        base_name = os.path.splitext(title)[0]
+        self._iv_dialog.add_curve(base_name, self._last_result_text, self._last_fit_data)
+        if not self._iv_dialog.isVisible():
+            self._iv_dialog.show()

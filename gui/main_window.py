@@ -901,6 +901,13 @@ class FileExplorerApp(QMainWindow):
                     operation_display = eng
                     break
             self.statusBar.showMessage(f"Processing complete: {operation_display}")
+
+            # 自动建议保存文件名（仅当输入框为空时填入，不覆盖用户自定义内容）
+            base_name = os.path.splitext(os.path.basename(self.current_file_path))[0]
+            op_short = operation_display.lower().replace(" ", "_").replace("-", "_")
+            suggested_name = f"{base_name}_{op_short}"
+            self.processing_tab.set_default_filename(suggested_name)
+
         else:
             QMessageBox.warning(self, "Error", message)
     
@@ -909,39 +916,72 @@ class FileExplorerApp(QMainWindow):
         if self.processed_data is None:
             QMessageBox.warning(self, "Error", "No processed data to save")
             return
-        
-        # 默认保存路径
+
+        # 默认保存目录
         default_dir = self.current_folder
-        
-        # 生成默认文件名
-        file_count = len([f for f in os.listdir(default_dir) 
-                         if f.startswith("proc_") and f.endswith(".h5")])
-        default_name = f"proc_{file_count:04d}.h5"
-        
-        # 获取保存路径
-        save_path, _ = QFileDialog.getSaveFileName(
-            self, "Save Processed Data", 
-            os.path.join(default_dir, default_name),
-            "HDF5 Files (*.h5)"
+
+        # ── 从 Processing Tab 的 UI 输入框读取文件名 ──────────────────────
+        filename = self.processing_tab.get_output_filename()
+
+        if not filename:
+            # 输入框为空：自动生成建议名并填入 UI，让用户确认后再点一次
+            file_count = len([f for f in os.listdir(default_dir)
+                              if f.startswith("proc_") and f.endswith(".h5")])
+            suggested = f"proc_{file_count:04d}"
+            self.processing_tab.set_default_filename(suggested)
+            QMessageBox.information(
+                self,
+                "File Name Required",
+                f"A default file name \"{suggested}\" has been filled in.\n"
+                "You can change it in the \"Output File Name\" field in the\n"
+                "Process tab, then click Save Results again."
+            )
+            return
+
+        # 确保文件名没有扩展名冲突
+        if filename.endswith(".h5"):
+            filename = filename[:-3]
+
+        # ── 只选保存目录（无输入框，无 macOS IME bug）────────────────────
+        save_dir = QFileDialog.getExistingDirectory(
+            self, "Select Save Directory", default_dir
         )
-        
-        if save_path:
-            # Update processor sampling rate with current UI value
-            self.data_processor.sampling_rate = self.viz_controls_tab.sampling_rate_input.value()
-            
-            success, message = self.data_processor.save_processed_data(
-                self.processed_data, save_path)
-            
-            if success:
-                QMessageBox.information(self, "Success", "Data saved successfully")
-                
-                # 添加到处理后文件列表
-                self.processed_files_widget.add_file(save_path)
-                
-                # 更新状态栏
-                self.statusBar.showMessage(f"File saved: {os.path.basename(save_path)}")
-            else:
-                QMessageBox.warning(self, "Error", message)
+
+        if not save_dir:
+            return  # 用户取消
+
+        save_path = os.path.join(save_dir, filename + ".h5")
+
+        # 如果文件已存在，询问是否覆盖
+        if os.path.exists(save_path):
+            reply = QMessageBox.question(
+                self, "File Exists",
+                f'"{filename}.h5" already exists in the selected folder.\nOverwrite it?',
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+            )
+            if reply != QMessageBox.StandardButton.Yes:
+                return
+
+        # Update processor sampling rate with current UI value
+        self.data_processor.sampling_rate = self.viz_controls_tab.sampling_rate_input.value()
+
+        success, message = self.data_processor.save_processed_data(
+            self.processed_data, save_path)
+
+        if success:
+            QMessageBox.information(self, "Success", "Data saved successfully")
+
+            # 添加到处理后文件列表
+            self.processed_files_widget.add_file(save_path)
+
+            # 清空文件名输入框，方便下次重新命名
+            self.processing_tab.filename_input.clear()
+
+            # 更新状态栏
+            self.statusBar.showMessage(f"File saved: {os.path.basename(save_path)}")
+        else:
+            QMessageBox.warning(self, "Error", message)
+
     
     def scan_processed_files(self):
         """扫描处理后文件夹"""

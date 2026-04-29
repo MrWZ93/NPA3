@@ -7,7 +7,8 @@
 from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QTextEdit, 
                             QPushButton, QLabel, QMessageBox, QGroupBox,
                             QFormLayout, QComboBox, QSpinBox, QDoubleSpinBox, 
-                            QScrollArea, QCheckBox,QListWidget, QListWidgetItem)
+                            QScrollArea, QCheckBox, QListWidget, QListWidgetItem,
+                            QLineEdit)
 from PyQt6.QtCore import Qt, QSize
 from PyQt6.QtGui import QIcon, QFont
 
@@ -478,6 +479,43 @@ class ProcessingTab(QWidget):
         self.operation_combo.setMinimumWidth(200)
         self.channel_combo.setMinimumWidth(200)
 
+        # ── 输出文件名设置区域 ────────────────────────────────────────────
+        output_header = StyleHelper.header_label("Output File Name")
+        self.output_group = QGroupBox()
+        output_inner = QVBoxLayout()
+
+        output_desc = QLabel("Set the file name for the saved result (without extension):")
+        output_desc.setStyleSheet("color: #666; font-size: 10pt;")
+        output_inner.addWidget(output_desc)
+
+        filename_row = QHBoxLayout()
+        self.filename_input = QLineEdit()
+        self.filename_input.setPlaceholderText("e.g. proc_0001")
+        self.filename_input.setMinimumHeight(32)
+        self.filename_input.setStyleSheet("""
+            QLineEdit {
+                padding: 4px 8px;
+                border: 1px solid #cccccc;
+                border-radius: 4px;
+                background-color: white;
+                font-size: 11pt;
+            }
+            QLineEdit:focus {
+                border: 1.5px solid #0078d7;
+            }
+        """)
+        self.ext_label = QLabel(".h5")
+        self.ext_label.setStyleSheet("color: #555; font-size: 10pt; padding-left: 4px;")
+        filename_row.addWidget(self.filename_input)
+        filename_row.addWidget(self.ext_label)
+        output_inner.addLayout(filename_row)
+
+        output_wrapper = QVBoxLayout()
+        output_wrapper.addWidget(output_header)
+        output_wrapper.addLayout(output_inner)
+        self.output_group.setLayout(output_wrapper)
+        # ─────────────────────────────────────────────────────────────────
+
         # 操作按钮
         # 创建美观的按钮
         self.process_button = QPushButton("Process Data")
@@ -494,6 +532,7 @@ class ProcessingTab(QWidget):
         self.layout.addWidget(self.operation_group)
         self.layout.addWidget(self.channel_group)  # 添加通道选择区域
         self.layout.addWidget(self.params_group)
+        self.layout.addWidget(self.output_group)   # 输出文件名
         self.layout.addWidget(self.process_button)
         self.layout.addWidget(self.save_button)
         self.layout.addStretch()
@@ -880,7 +919,18 @@ class ProcessingTab(QWidget):
     def set_visualizer(self, visualizer):
         """设置可视化组件的引用"""
         self.visualizer = visualizer
-    
+
+    def get_output_filename(self):
+        """获取用户在 UI 中输入的输出文件名（不含扩展名）"""
+        name = self.filename_input.text().strip()
+        return name if name else None
+
+    def set_default_filename(self, name: str):
+        """当输入框为空时自动填入建议的文件名（不覆盖用户已填的内容）"""
+        if not self.filename_input.text().strip():
+            self.filename_input.setText(name)
+
+
     def use_current_window_range(self):
         """使用当前可视化窗口的时间范围设置 trim 参数"""
         if self.visualizer is None:

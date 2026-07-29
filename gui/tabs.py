@@ -972,3 +972,4 @@ class ProcessingTab(QWidget):
         else:
             QMessageBox.warning(self, "Error", "Trim parameters not available")
 
+

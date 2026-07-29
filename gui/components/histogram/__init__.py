@@ -9,5 +9,6 @@ from .histogram_dialog import HistogramDialog
 from .histogram_plot import HistogramPlot
 from .controls import HistogramControlPanel, FileChannelControl
 from .data_manager import HistogramDataManager
+from .state_label import StateLabelDialog
 
-__all__ = ['HistogramDialog', 'HistogramPlot', 'HistogramControlPanel', 'FileChannelControl', 'HistogramDataManager', 'PopupCursorManager']
+__all__ = ['HistogramDialog', 'HistogramPlot', 'HistogramControlPanel', 'FileChannelControl', 'HistogramDataManager', 'StateLabelDialog']

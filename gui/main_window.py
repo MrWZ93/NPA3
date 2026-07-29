@@ -245,12 +245,12 @@ class FileExplorerApp(QMainWindow):
         # 创建可视化控制标签页
         self.viz_controls_tab = VisualizationControlsTab()
         
-        self.tabs.addTab(self.details_tab, QIcon.fromTheme("dialog-information"), "Info")
-        self.tabs.addTab(self.processing_tab, QIcon.fromTheme("system-run"), "Proc")
-        self.tabs.addTab(self.viz_controls_tab, QIcon.fromTheme("preferences-desktop"), "View")
-        self.tabs.addTab(self.notes_tab, QIcon.fromTheme("accessories-text-editor"), "Note")
+        self.tabs.addTab(self.details_tab, "Info")
+        self.tabs.addTab(self.processing_tab, "Proc")
+        self.tabs.addTab(self.viz_controls_tab, "View")
+        self.tabs.addTab(self.notes_tab, "Note")
         
-        # 设置选项卡的样式 - 缩小宽度以显示更多tab
+        # 设置选项卡样式
         self.tabs.setStyleSheet("""
             QTabBar::tab {
                 min-width: 50px;
@@ -1158,14 +1158,18 @@ class FileExplorerApp(QMainWindow):
             QMessageBox.warning(self, "Error", "Please load data first")
             return
             
-        # 创建直方图对话框
-        dialog = HistogramDialog(self)
-        
-        # 设置数据和采样率
-        dialog.set_data(self.visualizer.data, self.visualizer.sampling_rate)
-        
-        # 显示对话框
-        dialog.exec()
+        # 如果对话框已存在，则显示并激活它，同时更新数据
+        if hasattr(self, 'histogram_dialog') and self.histogram_dialog is not None:
+            self.histogram_dialog.set_data(self.visualizer.data, self.visualizer.sampling_rate)
+            self.histogram_dialog.show()
+            self.histogram_dialog.raise_()
+            self.histogram_dialog.activateWindow()
+        else:
+            self.histogram_dialog = HistogramDialog(self)
+            self.histogram_dialog.set_data(self.visualizer.data, self.visualizer.sampling_rate)
+            self.histogram_dialog.show()
+            self.histogram_dialog.raise_()
+            self.histogram_dialog.activateWindow()
     
     def show_help(self):
         """显示帮助对话框"""

@@ -428,14 +428,15 @@ class IntegratedDataExporter:
     def _export_main_view_image(self, file_path):
         """导出主视图图像"""
         try:
-            if hasattr(self.dialog, 'plot_canvas'):
-                self.dialog.plot_canvas.figure.savefig(
+            if hasattr(self.dialog, 'plot_canvas') and self.dialog.plot_canvas is not None:
+                self.dialog.plot_canvas.print_figure(
                     file_path, 
                     dpi=300, 
                     bbox_inches='tight',
                     facecolor='white',
                     edgecolor='none'
                 )
+                self.dialog.plot_canvas.draw_idle()
                 return True
             return False
             
@@ -446,14 +447,15 @@ class IntegratedDataExporter:
     def _export_histogram_view_image(self, file_path):
         """导出直方图视图图像"""
         try:
-            if hasattr(self.dialog, 'subplot3_canvas'):
-                self.dialog.subplot3_canvas.figure.savefig(
+            if hasattr(self.dialog, 'subplot3_canvas') and self.dialog.subplot3_canvas is not None:
+                self.dialog.subplot3_canvas.print_figure(
                     file_path, 
                     dpi=300, 
                     bbox_inches='tight',
                     facecolor='white',
                     edgecolor='none'
                 )
+                self.dialog.subplot3_canvas.draw_idle()
                 return True
             return False
             
@@ -471,7 +473,7 @@ class ImageClipboardManager:
         try:
             # 1. 渲染main view到缓冲区
             main_buffer = io.BytesIO()
-            main_canvas.figure.savefig(
+            main_canvas.print_figure(
                 main_buffer, 
                 format='png', 
                 dpi=300,
@@ -480,10 +482,11 @@ class ImageClipboardManager:
                 edgecolor='none'
             )
             main_buffer.seek(0)
+            main_canvas.draw_idle()
             
             # 2. 渲染histogram view到缓冲区
             hist_buffer = io.BytesIO()
-            histogram_canvas.figure.savefig(
+            histogram_canvas.print_figure(
                 hist_buffer, 
                 format='png', 
                 dpi=300,
@@ -492,6 +495,7 @@ class ImageClipboardManager:
                 edgecolor='none'
             )
             hist_buffer.seek(0)
+            histogram_canvas.draw_idle()
             
             # 3. 使用PIL合并图像
             main_image = Image.open(main_buffer)

@@ -19,6 +19,7 @@ from .histogram_controller import HistogramController
 from .export_tools import IntegratedDataExporter, ImageClipboardManager, HistogramExporter
 # from .popup_cursor_manager import PopupCursorManager  # 不再需要，功能已集成到cursor_info_panel
 from .dialog_config import DialogConfig, UITexts
+from .state_label import StateLabelDialog
 
 
 class HistogramDialog(QDialog):
@@ -812,3 +813,28 @@ class HistogramDialog(QDialog):
             print(f"Error in on_toggle_cursors_visibility: {e}")
             import traceback
             traceback.print_exc()
+
+    def open_state_label_dialog(self):
+        """打开 State Label 分析窗口 - 聚焦 Highlighted Region 专区"""
+        if hasattr(self, 'state_label_dialog') and self.state_label_dialog is not None:
+            if hasattr(self, 'plot_canvas') and self.plot_canvas is not None:
+                self.state_label_dialog.sync_with_main_view(self.plot_canvas)
+            self.state_label_dialog.show()
+            self.state_label_dialog.raise_()
+            self.state_label_dialog.activateWindow()
+        else:
+            self.state_label_dialog = StateLabelDialog(self)
+            if hasattr(self, 'plot_canvas') and self.plot_canvas is not None:
+                self.state_label_dialog.sync_with_main_view(self.plot_canvas)
+            self.state_label_dialog.show()
+            self.state_label_dialog.raise_()
+            self.state_label_dialog.activateWindow()
+
+    def closeEvent(self, event):
+        """关闭 Histogram 对话框时连带关闭关联的 State Label 窗口"""
+        if hasattr(self, 'state_label_dialog') and self.state_label_dialog is not None:
+            try:
+                self.state_label_dialog.close()
+            except Exception:
+                pass
+        super().closeEvent(event)

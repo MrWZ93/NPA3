@@ -90,6 +90,10 @@ class HistogramUIBuilder:
         settings_group = self._create_histogram_settings_group()
         layout.addWidget(settings_group)
         
+        # State Label组
+        state_label_group = self._create_state_label_group()
+        layout.addWidget(state_label_group)
+        
         # Export Tools组 - 使用较少，放在最下面
         export_group = self._create_export_tools_group()
         layout.addWidget(export_group)
@@ -226,6 +230,31 @@ class HistogramUIBuilder:
         self.dialog.export_tools = export_tools
         
         return group
+    
+    def _create_state_label_group(self):
+        """创建 State Label 工具组"""
+        group = QGroupBox("State Label")
+        group.setStyleSheet(StyleSheets.get_groupbox_style())
+        
+        layout = QVBoxLayout()
+        layout.setContentsMargins(*DialogConfig.GROUP_MARGINS)
+        layout.setSpacing(DialogConfig.GROUP_SPACING_SMALL)
+        
+        state_label_btn = QPushButton("State Label View")
+        state_label_btn.setStyleSheet(StyleSheets.get_button_style('primary'))
+        state_label_btn.setToolTip("Open State Label window displaying Main view subplots with matching proportions")
+        state_label_btn.clicked.connect(self._on_state_label_clicked)
+            
+        layout.addWidget(state_label_btn)
+        group.setLayout(layout)
+        
+        self.dialog.state_label_btn = state_label_btn
+        return group
+
+    def _on_state_label_clicked(self):
+        """State Label 按钮点击回调"""
+        if hasattr(self.dialog, 'open_state_label_dialog'):
+            self.dialog.open_state_label_dialog()
     
     def _build_central_area(self):
         """构建中央图表显示区域"""

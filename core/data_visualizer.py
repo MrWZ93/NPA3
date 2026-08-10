@@ -14,6 +14,7 @@ from gui.styles import PLOT_STYLE, PLOT_COLORS, COLORS
 
 # 引入信号机制
 from PyQt6.QtCore import pyqtSignal, QObject
+from core.plot_interaction_controller import PlotInteractionController
 
 class DataVisualizer(FigureCanvas):
     """数据可视化组件"""
@@ -41,6 +42,13 @@ class DataVisualizer(FigureCanvas):
         self.visible_channels = []  # 存储需要显示的通道
         self.original_data = None  # 存储原始数据，以便过滤显示通道
         self.current_time_axis = None  # 存储当前显示的时间轴，供trim操作使用
+        
+        # 初始化交互控制器
+        self.controller = PlotInteractionController(self)
+    
+    def contextMenuEvent(self, event):
+        """拦截 Qt 右键上下文菜单，使用户可以右键单步撤销视图"""
+        event.accept()
     
     def plot_data(self, data, title="Data", xlabel="Time (s)", ylabel="Value", sampling_rate=None, channels_to_plot=None):
         """绘制数据 - 使用美化样式"""
@@ -331,6 +339,10 @@ class DataVisualizer(FigureCanvas):
         self.fig.tight_layout()
         self.fig.subplots_adjust(top=0.9)  # Make room for suptitle
         self.draw()
+        
+        # 通知交互控制器图形与子图已更新
+        if hasattr(self, 'controller'):
+            self.controller.on_plot_updated()
     
     def set_sync_mode(self, sync):
         """设置X轴同步模式"""
@@ -423,14 +435,12 @@ class DataVisualizer(FigureCanvas):
                 self.axes[i].autoscale(enable=True, axis='x')
 
     def on_draw(self, event):
-        """在图形重绘时调用来同步X轴"""
-        if self.sync_mode and len(self.axes) > 1:
-            self.sync_x_axes()
+        """在图形重绘时调用的回调"""
+        pass
 
     def on_button_release(self, event):
-        """在鼠标松开时调用，用于处理缩放和平移后的同步"""
-        if self.sync_mode and len(self.axes) > 1:
-            self.sync_x_axes()
+        """在鼠标松开时调用"""
+        pass
     
     def get_current_time_axis(self):
         """获取当前显示的时间轴，供trim操作使用"""

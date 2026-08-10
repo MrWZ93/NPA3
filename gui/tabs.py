@@ -232,6 +232,7 @@ class VisualizationControlsTab(QWidget):
     # 添加显示通道变化的信号
     from PyQt6.QtCore import pyqtSignal
     channel_selection_changed = pyqtSignal(list)
+    view_window_requested = pyqtSignal(object)
     """可视化控制标签页"""
     def __init__(self, parent=None):
         super(VisualizationControlsTab, self).__init__(parent)
@@ -331,10 +332,33 @@ class VisualizationControlsTab(QWidget):
         sync_wrapper.addLayout(self.sync_layout)
         self.sync_group.setLayout(sync_wrapper)
 
+        # 快速时间窗口 View Window 设置
+        view_win_header = StyleHelper.header_label("View Window")
+        self.view_win_group = QGroupBox()
+        view_win_wrapper = QVBoxLayout()
+        view_win_wrapper.addWidget(view_win_header)
+
+        self.view_win_buttons_layout = QHBoxLayout()
+        windows = [
+            ("Full", "full"),
+            ("1 s", 1.0),
+            ("100 ms", 0.1),
+            ("10 ms", 0.01),
+            ("1 ms", 0.001)
+        ]
+        for label, val in windows:
+            btn = QPushButton(label)
+            btn.clicked.connect(lambda checked, v=val: self.view_window_requested.emit(v))
+            self.view_win_buttons_layout.addWidget(btn)
+
+        view_win_wrapper.addLayout(self.view_win_buttons_layout)
+        self.view_win_group.setLayout(view_win_wrapper)
+
         # 添加到主布局
         self.layout.addWidget(self.sampling_rate_group)
         self.layout.addWidget(self.subplot_group)
         self.layout.addWidget(self.sync_group)  # 添加同步设置组
+        self.layout.addWidget(self.view_win_group)  # 添加 View Window 设置组
         self.layout.addStretch()
         
         # 添加通道选择相关的方法

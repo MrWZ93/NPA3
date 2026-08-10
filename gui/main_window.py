@@ -278,6 +278,7 @@ class FileExplorerApp(QMainWindow):
         
         # 创建导航工具栏
         self.toolbar = NavigationToolbar(self.visualizer, self.center_widget)
+        self.visualizer.controller.set_toolbar(self.toolbar)
         
         # 扩大可视化区域
         self.visualizer.setMinimumSize(800, 600)  # 设置最小尺寸
@@ -643,6 +644,7 @@ class FileExplorerApp(QMainWindow):
         self.viz_controls_tab.subplot_button.clicked.connect(self.configure_subplot_heights)
         self.viz_controls_tab.sync_check.stateChanged.connect(self.toggle_sync_mode)
         self.viz_controls_tab.apply_channel_button.clicked.connect(self.apply_channel_selection)
+        self.viz_controls_tab.view_window_requested.connect(self.visualizer.controller.set_view_window)
         
         # 连接可视化器的通道更新信号到控制面板
         self.visualizer.channels_updated.connect(self.viz_controls_tab.update_available_channels)

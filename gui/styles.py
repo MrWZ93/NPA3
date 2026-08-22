@@ -298,6 +298,9 @@ PLOT_STYLE = {
     "text.color": COLORS["text"],
     "lines.linewidth": 2,
     "lines.markersize": 6,
+    "path.simplify": True,
+    "path.simplify_threshold": 1.0,
+    "agg.path.chunksize": 20000,
     "font.family": "sans-serif",
     "font.sans-serif": ["SF Pro Display", "Helvetica Neue", "Arial", "DejaVu Sans"],
 }

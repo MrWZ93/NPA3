@@ -1,16 +1,21 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Matplotlib 画布交互控制器 (高性能 Blitting 与绝对像素平移优化版)
-封装高级鼠标交互：滚轮缩放、左键 Pan、Shift+左键框选、右键视图撤销、Crosshair 准星与 View Window 控制
-使用 Matplotlib Blitting 技术与绝对屏幕像素坐标平移，确保无闪烁、无震荡、高平滑度体验
+Matplotlib 画布交互控制器 (连贯渐变缩放与全新鼠标按键映射优化版)
+封装高级鼠标交互：
+- 左键拖拽：平移移动视图 (Left-Click Drag Pan)
+- 右键拖拽：直接框选区域放大 (Right-Click Drag Rubberband Box Zoom)
+- 单击右键：逐级撤销视图历史 (Right-Click Undo)
+- 双击左键：恢复 Full View
+- 滚轮：30 FPS 连贯渐变 X 轴缩放
+- Shift+滚轮：Y 轴缩放
 """
 
 import time
 import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.patches import Rectangle
-from PyQt6.QtCore import QObject, pyqtSignal, Qt
+from PyQt6.QtCore import QObject, pyqtSignal, Qt, QTimer
 from PyQt6.QtWidgets import QApplication
 
 class PlotInteractionController(QObject):
@@ -27,20 +32,30 @@ class PlotInteractionController(QObject):
         self.max_history = 50
         self.last_history_push_time = 0
         
-        # 交互状态
+        # 防抖/延迟渲染控制
+        self.draw_timer = QTimer()
+        self.draw_timer.setSingleShot(True)
+        self.draw_timer.timeout.connect(self._deferred_draw)
+        self.last_scroll_render_time = 0
+        
+        # 交互状态 - 左键平移
         self.is_panning = False
         self.pan_start_event = None
-        self.pan_start_pixel = None  # (pixel_x, pixel_y) 拖拽起点绝对屏幕像素坐标
-        self.pan_init_limits = {}  # {ax: (xlim, ylim)}
+        self.pan_start_pixel = None  # (pixel_x, pixel_y)
+        self.pan_init_limits = {}
+        self.pan_has_moved = False
         
+        # 交互状态 - 右键直接框选放大
         self.is_rect_zooming = False
         self.rect_start_pos = None  # (xdata, ydata)
+        self.rect_start_pixel = None  # (pixel_x, pixel_y)
         self.rect_ax = None
         self.rect_patch = None
+        self.rect_has_moved = False  # 用于区分右键单击撤销与右键拖拽框选
         
         # 十字准星与坐标记录
         self.crosshair_lines = {}  # {ax: Line2D}
-        self.last_cursor_time = None  # 最近鼠标悬停的 X 坐标 (s)
+        self.last_cursor_time = None
         self.last_cursor_val = None
         
         # Blitting 背景缓存
@@ -77,7 +92,6 @@ class PlotInteractionController(QObject):
         """当 DataVisualizer 绘制了新的数据/Subplots 时调用"""
         self._setup_crosshairs()
         self._need_bg_update = True
-        # 清空/更新初始视图栈
         if not self.history_stack and self.visualizer.axes:
             self.push_view_history()
 
@@ -89,7 +103,7 @@ class PlotInteractionController(QObject):
         self._need_bg_update = False
 
     def _setup_crosshairs(self):
-        """为所有 Subplot 初始化淡色垂直 Crosshair 虚线 (使用 animated=True)"""
+        """为所有 Subplot 初始化淡色垂直 Crosshair 虚线"""
         self.crosshair_lines.clear()
         for ax in self.visualizer.axes:
             line = ax.axvline(x=0, color='#888888', linestyle='--', linewidth=0.8, alpha=0.6, visible=False)
@@ -133,12 +147,16 @@ class PlotInteractionController(QObject):
                 ax.set_xlim(xlim)
                 ax.set_ylim(ylim)
         
-        self._need_bg_update = True
-        self.fig.canvas.draw_idle()
+        self._deferred_draw()
         return True
 
+    def _deferred_draw(self):
+        """触发图形重绘"""
+        self._need_bg_update = True
+        self.fig.canvas.draw_idle()
+
     def on_scroll(self, event):
-        """鼠标滚轮事件处理：超细粒度平滑 X 轴缩放 / Shift+滚轮 Y 轴缩放"""
+        """鼠标滚轮事件处理：渐变连贯 X/Y 轴缩放"""
         if self.is_toolbar_active():
             return
         if event.inaxes is None or event.xdata is None or event.ydata is None:
@@ -156,15 +174,14 @@ class PlotInteractionController(QObject):
         if step == 0:
             step = 1.0 if event.button == 'up' else -1.0
 
-        # 精细化微调缩放步幅：基准比例设为 3.5% (0.965)，防调过头
+        # 基准单步缩放比例：4.0% (0.96)
         step_mag = min(abs(step), 2.0)
         if step > 0:
-            scale_factor = 0.965 ** step_mag
+            scale_factor = 0.96 ** step_mag
         else:
-            scale_factor = (1.0 / 0.965) ** step_mag
+            scale_factor = (1.0 / 0.96) ** step_mag
 
-        # 连续快速滚动时合并历史压栈
-        if time.time() - self.last_history_push_time > 0.3:
+        if time.time() - self.last_history_push_time > 0.4:
             self.push_view_history()
 
         ax = event.inaxes
@@ -187,56 +204,59 @@ class PlotInteractionController(QObject):
                 ax.set_xlim(new_xmin, new_xmax)
 
         self._need_bg_update = True
-        self.fig.canvas.draw_idle()
+
+        # 核心改进：30 FPS (33ms) 渐变连贯重绘！
+        # 确保在连续滚动过程中画面平滑缩放，用户能清楚看见放大缩小的渐变过程
+        now = time.time()
+        if now - self.last_scroll_render_time >= 0.033:
+            self.fig.canvas.draw_idle()
+            self.last_scroll_render_time = now
+            self.draw_timer.stop()
+        else:
+            self.draw_timer.start(35)
 
     def on_button_press(self, event):
-        """鼠标按键按下处理：Pan、Shift+矩形缩放、双击全图、右键撤销"""
+        """按键按下处理：左键拖拽平移、右键框选放大、双击恢复全图"""
         if self.is_toolbar_active():
             return
         if event.inaxes is None:
             return
 
-        shift_pressed = False
-        if event.key and 'shift' in event.key:
-            shift_pressed = True
-        else:
-            modifiers = QApplication.keyboardModifiers()
-            if modifiers & Qt.KeyboardModifier.ShiftModifier:
-                shift_pressed = True
-
-        if event.button == 3:
-            self.pop_view_history()
-            return
-
+        # 1. 左键双击 (button == 1 & dblclick)：恢复 Full View
         if event.button == 1 and getattr(event, 'dblclick', False):
             self.reset_full_view(target_ax=event.inaxes)
             return
 
+        # 2. 按住左键拖动：平移移动视图
         if event.button == 1:
-            if shift_pressed:
-                self.is_rect_zooming = True
-                self.rect_ax = event.inaxes
-                self.rect_start_pos = (event.xdata, event.ydata)
-                
-                if self.rect_patch and self.rect_patch.axes:
-                    self.rect_patch.remove()
-                self.rect_patch = Rectangle(
-                    (event.xdata, event.ydata), 0, 0,
-                    fill=True, facecolor='#0078d7', edgecolor='#0078d7',
-                    alpha=0.25, linestyle='--'
-                )
-                self.rect_patch.set_animated(True)
-                self.rect_ax.add_patch(self.rect_patch)
-            else:
-                self.is_panning = True
-                self.pan_start_event = event
-                # 关键修复：记录初始屏幕像素坐标 (event.x, event.y)，避免数据坐标更新导致的闪烁反馈环
-                self.pan_start_pixel = (event.x, event.y)
-                self.pan_init_limits = {sub_ax: (sub_ax.get_xlim(), sub_ax.get_ylim()) for sub_ax in self.visualizer.axes}
-                self.push_view_history()
+            self.is_panning = True
+            self.pan_start_event = event
+            self.pan_start_pixel = (event.x, event.y)
+            self.pan_init_limits = {sub_ax: (sub_ax.get_xlim(), sub_ax.get_ylim()) for sub_ax in self.visualizer.axes}
+            self.pan_has_moved = False
+            return
+
+        # 3. 按住右键拖动：矩形框选放大区域
+        if event.button == 3:
+            self.is_rect_zooming = True
+            self.rect_ax = event.inaxes
+            self.rect_start_pos = (event.xdata, event.ydata)
+            self.rect_start_pixel = (event.x, event.y)
+            self.rect_has_moved = False
+
+            if self.rect_patch and self.rect_patch.axes:
+                self.rect_patch.remove()
+            self.rect_patch = Rectangle(
+                (event.xdata, event.ydata), 0, 0,
+                fill=True, facecolor='#0078d7', edgecolor='#0078d7',
+                alpha=0.25, linestyle='--'
+            )
+            self.rect_patch.set_animated(True)
+            self.rect_ax.add_patch(self.rect_patch)
+            return
 
     def on_motion_notify(self, event):
-        """鼠标移动处理：绝对像素 Pan 平移与 Crosshair/矩形框 Blitting 极速绘制"""
+        """鼠标移动处理：左键绝对像素 Pan 平移、右键框选显示、Crosshair 准星 Blitting 绘制"""
         if event.inaxes is None or event.xdata is None or event.ydata is None:
             self.on_leave(event)
             return
@@ -250,22 +270,25 @@ class PlotInteractionController(QObject):
 
         canvas = self.fig.canvas
 
-        # 1. 处理 Pan 拖拽平移 (基准屏幕绝对像素位移，无震荡闪烁)
+        # 1. 处理左键拖拽平移 (Left-Click Drag Pan)
         if self.is_panning and self.pan_start_pixel and self.pan_start_event:
+            dx_pix = event.x - self.pan_start_pixel[0]
+            dy_pix = event.y - self.pan_start_pixel[1]
+
+            # 只要像素移动大于 3px，就认定为拖拽
+            if abs(dx_pix) > 3 or abs(dy_pix) > 3:
+                if not self.pan_has_moved:
+                    self.pan_has_moved = True
+                    self.push_view_history()
+
             pan_ax = self.pan_start_event.inaxes
             if pan_ax in self.pan_init_limits:
-                # 计算屏幕像素位移
-                dx_pix = event.x - self.pan_start_pixel[0]
-                dy_pix = event.y - self.pan_start_pixel[1]
-
                 bbox = pan_ax.get_window_extent()
                 if bbox.width > 0 and bbox.height > 0:
                     orig_xlim, orig_ylim = self.pan_init_limits[pan_ax]
                     x_per_pix = (orig_xlim[1] - orig_xlim[0]) / bbox.width
                     y_per_pix = (orig_ylim[1] - orig_ylim[0]) / bbox.height
 
-                    # 鼠标向右拖 (+dx_pix) -> 视图向左移 (-dx_pix * x_per_pix)
-                    # 鼠标向上拖 (+dy_pix) -> 视图向下移 (-dy_pix * y_per_pix)
                     pan_ax.set_ylim(orig_ylim[0] - dy_pix * y_per_pix, orig_ylim[1] - dy_pix * y_per_pix)
 
                     if self.visualizer.sync_mode:
@@ -278,11 +301,23 @@ class PlotInteractionController(QObject):
                         pan_ax.set_xlim(orig_xlim[0] - dx_pix * x_per_pix, orig_xlim[1] - dx_pix * x_per_pix)
 
                     self._need_bg_update = True
-                    canvas.draw_idle()
+                    now = time.time()
+                    if now - self.last_scroll_render_time >= 0.033:
+                        canvas.draw_idle()
+                        self.last_scroll_render_time = now
+                    else:
+                        if not self.draw_timer.isActive():
+                            self.draw_timer.start(35)
             return
 
-        # 2. 处理 Shift + 左键矩形选择框 (Blitting 高速渲染)
+        # 2. 处理右键直接框选放大 (Right-Click Drag Rubberband Zoom)
         if self.is_rect_zooming and self.rect_patch and self.rect_start_pos:
+            if self.rect_start_pixel:
+                dx_pix = event.x - self.rect_start_pixel[0]
+                dy_pix = event.y - self.rect_start_pixel[1]
+                if abs(dx_pix) > 3 or abs(dy_pix) > 3:
+                    self.rect_has_moved = True
+
             start_x, start_y = self.rect_start_pos
             width = event.xdata - start_x
             height = event.ydata - start_y
@@ -301,10 +336,10 @@ class PlotInteractionController(QObject):
                 self.rect_ax.draw_artist(self.rect_patch)
                 canvas.blit(self.fig.bbox)
             else:
-                canvas.draw_idle()
+                self.draw_timer.start(16)
             return
 
-        # 3. 普通鼠标移动：Blitting 极速更新 Crosshair 准星 (不触发完整数据重绘)
+        # 3. 普通鼠标移动：Blitting 极速更新 Crosshair 准星
         if self.crosshair_lines:
             cur_x = event.xdata
             if self.bg is not None and not self._need_bg_update:
@@ -320,25 +355,29 @@ class PlotInteractionController(QObject):
                     if ax in self.visualizer.axes:
                         line.set_xdata([cur_x, cur_x])
                         line.set_visible(True)
-                canvas.draw_idle()
+                self.draw_timer.start(16)
 
     def on_button_release(self, event):
-        """鼠标按键释放处理：完成 Pan 或矩形选择缩放"""
-        if self.is_panning:
+        """按键释放处理：左键完成平移、右键完成框选放大或判断为单击右键撤销"""
+        # 左键释放：完成平移
+        if self.is_panning and event.button == 1:
             self.is_panning = False
+            self._deferred_draw()
             self.pan_start_event = None
             self.pan_start_pixel = None
-            self._need_bg_update = True
-            self.fig.canvas.draw_idle()
+            self.pan_has_moved = False
+            return
 
-        if self.is_rect_zooming:
+        # 右键释放：完成框选放大，若未拖拽（单击右键）则判定为撤销 (Undo)
+        if self.is_rect_zooming and event.button == 3:
             self.is_rect_zooming = False
             if self.rect_patch:
                 if self.rect_patch.axes:
                     self.rect_patch.remove()
                 self.rect_patch = None
 
-            if self.rect_start_pos and event.xdata is not None and event.ydata is not None and self.rect_ax:
+            did_zoom = False
+            if self.rect_has_moved and self.rect_start_pos and event.xdata is not None and event.ydata is not None and self.rect_ax:
                 start_x, start_y = self.rect_start_pos
                 end_x, end_y = event.xdata, event.ydata
 
@@ -354,11 +393,18 @@ class PlotInteractionController(QObject):
                             sub_ax.set_xlim(x_min, x_max)
                     else:
                         self.rect_ax.set_xlim(x_min, x_max)
+                    did_zoom = True
 
             self.rect_start_pos = None
+            self.rect_start_pixel = None
             self.rect_ax = None
-            self._need_bg_update = True
-            self.fig.canvas.draw_idle()
+
+            if not did_zoom and not self.rect_has_moved:
+                # 没移动，视为右键单击撤销
+                self.pop_view_history()
+            else:
+                self._deferred_draw()
+            return
 
     def on_leave(self, event):
         """鼠标离开 subplot/figure 时隐藏 Crosshairs"""
@@ -371,7 +417,7 @@ class PlotInteractionController(QObject):
         else:
             for line in self.crosshair_lines.values():
                 line.set_visible(False)
-            canvas.draw_idle()
+            self._deferred_draw()
         if self.toolbar:
             self.toolbar.set_message("")
 
@@ -410,8 +456,7 @@ class PlotInteractionController(QObject):
             else:
                 ax.autoscale(enable=True, axis='x')
 
-        self._need_bg_update = True
-        self.fig.canvas.draw_idle()
+        self._deferred_draw()
 
     def set_view_window(self, window_sec):
         """快捷按指定时间跨度窗口 (sec) 查看数据"""
@@ -441,5 +486,4 @@ class PlotInteractionController(QObject):
         else:
             primary_ax.set_xlim(new_xmin, new_xmax)
 
-        self._need_bg_update = True
-        self.fig.canvas.draw_idle()
+        self._deferred_draw()

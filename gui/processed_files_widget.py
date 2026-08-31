@@ -12,6 +12,7 @@ from PyQt6.QtCore import Qt, QSize
 from PyQt6.QtGui import QFont, QIcon
 
 from gui.styles import COLORS, StyleHelper
+from utils.file_utils import show_file_context_menu
 
 class ProcessedFilesWidget(QWidget):
     """处理后文件显示区域"""
@@ -51,6 +52,8 @@ class ProcessedFilesWidget(QWidget):
         self.files_list = QListWidget()
         self.files_list.setSelectionMode(QListWidget.SelectionMode.SingleSelection)
         self.files_list.itemDoubleClicked.connect(self.rename_file)
+        self.files_list.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.files_list.customContextMenuRequested.connect(self._on_files_list_context_menu)
         self.files_list.setAlternatingRowColors(True)
         
         # 启用工具提示和文件名缩略
@@ -94,8 +97,23 @@ class ProcessedFilesWidget(QWidget):
         file_name = os.path.basename(file_path)
         item = QListWidgetItem(file_name)
         item.setToolTip(file_path)  # 设置完整路径为工具提示
+        item.setData(Qt.ItemDataRole.UserRole, file_path)
         self.files_list.addItem(item)
         self.file_paths[file_name] = file_path
+
+    def _on_files_list_context_menu(self, pos):
+        """右侧处理后文件列表右键菜单"""
+        item = self.files_list.itemAt(pos)
+        if not item:
+            return
+        self.files_list.setCurrentItem(item)
+        file_name = item.text()
+        file_path = item.data(Qt.ItemDataRole.UserRole) or self.file_paths.get(file_name) or item.toolTip()
+        if file_path:
+            main_window = QApplication.activeWindow()
+            from gui.main_window import FileExplorerApp
+            status_bar = main_window.statusBar if isinstance(main_window, FileExplorerApp) else None
+            show_file_context_menu(self.files_list, pos, file_path, status_bar=status_bar)
     
     def rename_file(self, item):
         """重命名文件"""

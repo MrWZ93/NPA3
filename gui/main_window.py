@@ -28,6 +28,7 @@ from gui.tabs import FileDetailsTab, NotesTab, VisualizationControlsTab, Process
 from gui.processed_files_widget import ProcessedFilesWidget
 from gui.components.psd_analyzer import PSDAnalyzerDialog
 from utils.config_manager import ConfigManager  # 添加ConfigManager导入
+from utils.file_utils import show_file_context_menu
 
 from gui.components.fitter_dialog import SimpleFitterDialog
 from gui.components.histogram import HistogramDialog
@@ -195,6 +196,8 @@ class FileExplorerApp(QMainWindow):
         self.file_list.itemClicked.connect(self.on_file_selected)
         self.file_list.setSelectionMode(QListWidget.SelectionMode.SingleSelection)
         self.file_list.setMinimumWidth(180)
+        self.file_list.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.file_list.customContextMenuRequested.connect(self._on_file_list_context_menu)
         # 启用工具提示以显示完整文件名
         self.file_list.setToolTip("")
         self.file_list.setMouseTracking(True)
@@ -568,7 +571,17 @@ class FileExplorerApp(QMainWindow):
                 
         except Exception as e:
             QMessageBox.warning(self, "Error", f"Failed to load folder contents: {str(e)}")
-    
+
+    def _on_file_list_context_menu(self, pos):
+        """左侧文件列表右键菜单"""
+        item = self.file_list.itemAt(pos)
+        if not item:
+            return
+        self.file_list.setCurrentItem(item)
+        file_path = item.data(Qt.ItemDataRole.UserRole)
+        if file_path:
+            show_file_context_menu(self.file_list, pos, file_path, status_bar=self.statusBar)
+
     def get_initial_folder(self):
         """获取初始文件夹路径"""
         # 从配置中获取默认路径
